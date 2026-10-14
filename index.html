@@ -117,7 +117,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button id="go" class="primary" type="button">開始拍攝</button>
     <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
     <p id="err" class="err" role="alert"></p>
-    <p class="ver">版本 2026-10-14h</p>
+    <p class="ver">版本 2026-10-14i</p>
   </section>
 
   <section id="cam" class="screen" hidden>
@@ -688,8 +688,15 @@ button{font:inherit;color:inherit;cursor:pointer}
   function detectTick(){
     if(state.screen!=='cam' || !det || detBusy || !v.videoWidth || !state.frame) return;
     var now=performance.now(); if(now<=detTs) now=detTs+1; detTs=now;
-    try{ state.det = toBoxes(det.detectForVideo(v, now).detections, cropRect()); }catch(e){ console.warn(e); lastErr='辨識：'+(e && e.message || e); }
+    // 只把比例框裡的畫面交給 AI：框外的東西不會被認到，偵測範圍 = 照片範圍
+    var rc=cropRect(), sc=Math.min(1, 640/Math.max(rc.w, rc.h));
+    var w=Math.round(rc.w*sc), h=Math.round(rc.h*sc);
+    if(detCanvas.width!==w) detCanvas.width=w;
+    if(detCanvas.height!==h) detCanvas.height=h;
+    detCtx.drawImage(v, rc.x,rc.y,rc.w,rc.h, 0,0,w,h);
+    try{ state.det = toBoxes(det.detectForVideo(detCanvas, now).detections, {x:0, y:0, w:w, h:h}); }catch(e){ console.warn(e); lastErr='辨識：'+(e && e.message || e); }
   }
+  var detCanvas=document.createElement('canvas'), detCtx=detCanvas.getContext('2d');
 
   // ===== 比例框 =====
   var v=$('#v'), cam=$('#cam'), frameEl=$('#frame'), ov=$('#ov'), st=$('#status');
