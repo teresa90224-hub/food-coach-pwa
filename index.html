@@ -232,7 +232,8 @@ button{font:inherit;color:inherit;cursor:pointer}
       pa = Math.min(35, tilt*3.5);
       if(tilt > TOL_DEG){
         if(Math.abs(ep) >= Math.abs(er)){
-          if(state.mode==='top') issues.push({pen:pa, msg:'手機再放平一點，鏡頭正對桌面'});
+          if(state.mode==='top' && ep>=25 && ep<=65) issues.push({pen:pa, msg:'現在是「俯拍」模式（要平放）。想拍 45° 請點下方「45°」'});
+          else if(state.mode==='top') issues.push({pen:pa, msg:'手機再放平一點，鏡頭正對桌面'});
           else issues.push({pen:pa, msg: ep>0 ? '鏡頭再往下壓一點' : '鏡頭再往前抬一點'});
         } else {
           issues.push({pen:pa, msg:'手機有點歪，轉正'});
@@ -410,7 +411,8 @@ button{font:inherit;color:inherit;cursor:pointer}
     $('#advice').textContent = advice;
     var bars=$('#bars'); bars.textContent='';
     parts.forEach(function(p){ bars.appendChild(barRow(p[0],p[1])); });
-    $('#rnote').textContent = opt.note || '評分只看技術面（角度、光線、構圖、清晰度），不評好不好看。長按照片可儲存。';
+    var modeTxt = ev.parts.angle!=null ? '本次以「'+(state.mode==='top'?'俯拍（手機平放）':'45°')+'」模式評角度。' : '';
+    $('#rnote').textContent = opt.note || (modeTxt+'評分只看技術面（角度、光線、構圖、清晰度），不評好不好看。長按照片可儲存。');
     show('res');
   }
 
