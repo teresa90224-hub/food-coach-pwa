@@ -54,6 +54,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 #ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;font-family:inherit}
 #hintCol{flex:1;display:flex;flex-direction:column;gap:6px}
 #status{font-size:13px;color:var(--ink);text-shadow:0 1px 3px #000;pointer-events:none}
+#compBtn{align-self:flex-start;pointer-events:auto;background:rgba(29,24,34,.85);border:1px solid var(--accent);color:var(--ink);border-radius:999px;min-height:36px;padding:0 14px;font-size:14px;font-weight:500}
+.ver{font-size:12px;color:var(--ink2)}
 #top{position:absolute;left:0;right:0;top:0;display:flex;gap:10px;align-items:flex-start;
   padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px;pointer-events:none}
 #hint{background:rgba(29,24,34,.82);border-radius:14px;padding:12px 14px;font-weight:500;font-size:17px;border-left:5px solid var(--warn)}
@@ -114,6 +116,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button id="go" class="primary" type="button">開始拍攝</button>
     <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
     <p id="err" class="err" role="alert"></p>
+    <p class="ver">版本 2026-10-14f</p>
   </section>
 
   <section id="cam" class="screen" hidden>
@@ -124,6 +127,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       <div id="hintCol">
         <div id="hint" class="info">準備中…</div>
         <div id="status" aria-live="polite"></div>
+        <button id="compBtn" type="button">構圖：自動</button>
       </div>
       <div id="score">--</div>
     </div>
@@ -216,7 +220,8 @@ button{font:inherit;color:inherit;cursor:pointer}
     set:function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
   };
   var state = {screen:'start', mode:store.get('fc-mode','top'), ratio:store.get('fc-ratio','3:4'),
-               frame:null, m:null, stream:null, last:null, det:[], boxes:[], mainRef:null, manual:false};
+               frame:null, m:null, stream:null, last:null, det:[], boxes:[], mainRef:null, manual:false,
+               comp:store.get('fc-comp','auto')};
   if(!RATIOS[state.ratio]) state.ratio='3:4';
   if(state.mode!=='top' && state.mode!=='angle') state.mode='top';
   var sm = {beta:null, gamma:null, has:false};
@@ -387,16 +392,54 @@ button{font:inherit;color:inherit;cursor:pointer}
     return boxes[best];
   }
 
+  // ===== 構圖範本 =====
+  // 每種構圖有幾組候選點位（0~1），挑「東西要移動最少」的那組
+  var COMP = {
+    center:  {name:'中心構圖', sets:[[[.5,.5]]]},
+    thirds:  {name:'三分法', sets:[[[1/3,1/3]],[[2/3,1/3]],[[1/3,2/3]],[[2/3,2/3]]]},
+    diagonal:{name:'對角線構圖', sets:[[[1/3,1/3],[2/3,2/3]],[[2/3,1/3],[1/3,2/3]]]},
+    triangle:{name:'三角構圖', sets:[[[.5,.28],[.27,.7],[.73,.7]],[[.27,.3],[.73,.3],[.5,.72]],[[.3,.27],[.72,.5],[.3,.73]],[[.7,.27],[.28,.5],[.7,.73]]]}
+  };
+  var COMP_ORDER = ['auto','center','thirds','diagonal','triangle'];
+  if(COMP_ORDER.indexOf(state.comp)<0) state.comp='auto';
+  var NUM = ['①','②','③'];
+  function perms(a){
+    if(a.length<=1) return [a];
+    var out=[]; a.forEach(function(x,i){ perms(a.slice(0,i).concat(a.slice(i+1))).forEach(function(p){ out.push([x].concat(p)); }); });
+    return out;
+  }
+  // 回傳 {key,name,slots,asg:[{box,slot,d}]}；asg 依重要性排序（主角在第一個）
+  function planComp(boxes){
+    if(!boxes.length) return null;
+    var rank=function(b){ return (b.main?1e3:0)+visArea(b)*b.wt; };
+    var objs=boxes.slice().sort(function(a,b){ return rank(b)-rank(a); });
+    var key=state.comp;
+    if(key==='auto') key = objs.length===1 ? (state.mode==='top'?'center':'thirds') : (objs.length===2 ? 'diagonal' : 'triangle');
+    var best=null;
+    COMP[key].sets.forEach(function(slots){
+      var k=Math.min(objs.length, slots.length);
+      perms(slots.map(function(_,i){return i;})).forEach(function(p){
+        var cost=0, asg=[];
+        for(var i=0;i<k;i++){
+          var c=center(objs[i]), t=slots[p[i]], d=Math.hypot(c.x-t[0], c.y-t[1]);
+          cost+=d*(objs[i].main?1.5:1); asg.push({box:objs[i], slot:p[i], d:d});
+        }
+        if(!best || cost<best.cost) best={key:key, name:COMP[key].name, slots:slots, asg:asg, cost:cost};
+      });
+    });
+    return best;
+  }
+
   function dirWord(dx,dy){
     var h = dx>.03 ? '右' : (dx<-.03 ? '左' : ''), vv = dy<-.03 ? '上' : (dy>.03 ? '下' : '');
     return h+vv;
   }
 
   // ===== 評估 =====
-  // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt, near}
+  // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt, plan}
   function evaluate(m, ori, opt){
     opt = opt||{};
-    var issues=[], pa=0, pl=0, pc=0, tilt=null, near=-1;
+    var issues=[], pa=0, pl=0, pc=0, tilt=null, plan=null;
 
     // 角度
     if(ori){
@@ -465,15 +508,23 @@ button{font:inherit;color:inherit;cursor:pointer}
           issues.push({pen:pb, msg:'東西都偏'+side2[0]+'：手機往'+side2[0]+'移，或在'+side2[1]+'邊補個配角'});
         }
       }
-      // 主角位置
-      if(main){
-        var mc=center(main), best=9;
-        TARGETS.forEach(function(t,i){ var dd=Math.hypot(mc.x-t[0], mc.y-t[1]); if(dd<best){best=dd; near=i;} });
-        if(best>SUBJ_TOL){
-          ps=Math.min(10,(best-SUBJ_TOL)*50);
-          var t=TARGETS[near], dw=dirWord(t[0]-mc.x, t[1]-mc.y), back=dirWord(mc.x-t[0], mc.y-t[1]);
-          issues.push({pen:ps+1, msg:'把主角「'+main.label+'」往'+dw+'移到黃點（或手機往'+back+'移）'});
+      // 構圖範本：每樣東西各自該去的點
+      plan=planComp(boxes);
+      if(plan){
+        var sumd=0, worst=null;
+        plan.asg.forEach(function(g){
+          var e=Math.max(0,g.d-SUBJ_TOL)*(g.box.main?1.5:1); sumd+=e;
+          if(g.d>SUBJ_TOL && (!worst || e>worst.e)) worst={g:g, e:e};
+        });
+        ps=Math.min(12, sumd*45);
+        if(worst){
+          var g=worst.g, gc=center(g.box), gt=plan.slots[g.slot], rk=plan.asg.indexOf(g);
+          var who = g.box.main ? '主角「'+g.box.label+'」' : '「'+g.box.label+'」';
+          var tail = plan.asg.length===1 ? '（或手機往'+dirWord(gc.x-gt[0], gc.y-gt[1])+'移）' : '';
+          issues.push({pen:ps+1, msg:plan.name+'：把'+who+'往'+dirWord(gt[0]-gc.x, gt[1]-gc.y)+'移到 '+NUM[rk]+' 號點'+tail});
         }
+        var miss=plan.slots.length-plan.asg.length;
+        if(miss>0) issues.push({pen:.8, msg:plan.name+'還差 '+miss+' 樣：在「＋」的位置補個配角', info:true});
       }
       pc = Math.min(25, pf+pb+pe+ps+po);
     } else if(m){
@@ -501,7 +552,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     issues.sort(function(a,b){return b.pen-a.pen;});
     var total = clamp(Math.round(100-pa-pl-pc),0,100);
     return {
-      score: total, issues: issues, tilt: tilt, near: near,
+      score: total, issues: issues, tilt: tilt, plan: plan,
       parts: {
         angle: ori ? Math.round(100-pa/35*100) : null,
         light: m ? Math.round(100-pl/30*100) : null,
@@ -510,34 +561,50 @@ button{font:inherit;color:inherit;cursor:pointer}
     };
   }
 
-  // ===== 疊圖：物件框、主角、黃點、箭頭 =====
+  // ===== 疊圖：構圖輔助線、物件框、編號點位、箭頭 =====
   // X/Y 把 0~1 座標換成 svg 座標；u = 線寬/字級基準
-  function overlaySVG(boxes, near, X, Y, u){
+  function overlaySVG(boxes, plan, X, Y, u){
     var s='<defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">'+
           '<path d="M0,0 L10,5 L0,10 z" fill="#f2b134"/></marker></defs>';
-    var main=null;
-    boxes.forEach(function(b){
-      var c=clipBox(b); if(c.w<=0||c.h<=0) return;
-      if(b.main){ main=b; return; }
-      var x=X(c.x), y=Y(c.y), w=X(c.x+c.w)-x, h=Y(c.y+c.h)-y;
-      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="'+u*2.6+'"/>';
-      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="rgba(246,239,227,.9)" stroke-width="'+u*1.2+'"/>';
-      s+=tag(x, y, b.label, false, u);
-    });
-    if(main){
-      var c=clipBox(main), x=X(c.x), y=Y(c.y), w=X(c.x+c.w)-x, h=Y(c.y+c.h)-y;
-      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="rgba(0,0,0,.5)" stroke-width="'+u*4.5+'"/>';
-      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="#f2b134" stroke-width="'+u*3+'"/>';
-      s+=tag(x, y, '主角・'+main.label, true, u);
-      TARGETS.forEach(function(t,i){
-        s+='<circle cx="'+X(t[0])+'" cy="'+Y(t[1])+'" r="'+u*5+'" fill="'+(i===near?'#f2b134':'none')+'" stroke="'+(i===near?'#f2b134':'rgba(246,239,227,.85)')+'" stroke-width="'+u*1.5+'"/>';
-      });
-      var mc=center(main);
-      if(near>=0 && Math.hypot(mc.x-TARGETS[near][0], mc.y-TARGETS[near][1])>SUBJ_TOL){
-        s+='<circle cx="'+X(mc.x)+'" cy="'+Y(mc.y)+'" r="'+u*3+'" fill="#f2b134"/>';
-        s+='<line x1="'+X(mc.x)+'" y1="'+Y(mc.y)+'" x2="'+X(TARGETS[near][0])+'" y2="'+Y(TARGETS[near][1])+'" stroke="rgba(0,0,0,.5)" stroke-width="'+u*5+'" stroke-linecap="round"/>';
-        s+='<line x1="'+X(mc.x)+'" y1="'+Y(mc.y)+'" x2="'+X(TARGETS[near][0])+'" y2="'+Y(TARGETS[near][1])+'" stroke="#f2b134" stroke-width="'+u*3+'" stroke-linecap="round" marker-end="url(#ah)"/>';
+    var dash='stroke="#f2b134" stroke-width="'+u*2+'" stroke-dasharray="'+u*8+' '+u*6+'" fill="none" opacity=".9"';
+    var rankOf=function(b){ if(!plan) return -1; for(var i=0;i<plan.asg.length;i++) if(plan.asg[i].box===b) return i; return -1; };
+    // 輔助線
+    if(plan){
+      var P=plan.slots;
+      if(plan.key==='triangle'){
+        s+='<polygon points="'+P.map(function(p){return X(p[0])+','+Y(p[1]);}).join(' ')+'" '+dash+'/>';
+      } else if(plan.key==='diagonal'){
+        var tlbr=(P[1][0]-P[0][0])*(P[1][1]-P[0][1])>0;
+        s+='<line x1="'+X(tlbr?0:1)+'" y1="'+Y(0)+'" x2="'+X(tlbr?1:0)+'" y2="'+Y(1)+'" '+dash+'/>';
+      } else if(plan.key==='center'){
+        s+='<circle cx="'+X(.5)+'" cy="'+Y(.5)+'" r="'+u*40+'" '+dash+'/>';
       }
+    }
+    // 物件框（主角最後畫，蓋在最上面）
+    var order=boxes.filter(function(b){return !b.main;}).concat(boxes.filter(function(b){return b.main;}));
+    order.forEach(function(b){
+      var c=clipBox(b); if(c.w<=0||c.h<=0) return;
+      var x=X(c.x), y=Y(c.y), w=X(c.x+c.w)-x, h=Y(c.y+c.h)-y, rk=rankOf(b);
+      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="rgba(0,0,0,.5)" stroke-width="'+u*(b.main?4.5:2.6)+'"/>';
+      s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+u*2+'" fill="none" stroke="'+(b.main?'#f2b134':'rgba(246,239,227,.9)')+'" stroke-width="'+u*(b.main?3:1.2)+'"/>';
+      s+=tag(x, y, (rk>=0?NUM[rk]:'')+(b.main?'主角・':'')+b.label, b.main, u);
+    });
+    if(plan){
+      // 箭頭：每樣東西 → 它的點
+      plan.asg.forEach(function(g){
+        if(g.d<=SUBJ_TOL) return;
+        var c=center(g.box), t=plan.slots[g.slot];
+        s+='<circle cx="'+X(c.x)+'" cy="'+Y(c.y)+'" r="'+u*3+'" fill="#f2b134"/>';
+        s+='<line x1="'+X(c.x)+'" y1="'+Y(c.y)+'" x2="'+X(t[0])+'" y2="'+Y(t[1])+'" stroke="rgba(0,0,0,.5)" stroke-width="'+u*5+'" stroke-linecap="round"/>';
+        s+='<line x1="'+X(c.x)+'" y1="'+Y(c.y)+'" x2="'+X(t[0])+'" y2="'+Y(t[1])+'" stroke="#f2b134" stroke-width="'+u*3+'" stroke-linecap="round" marker-end="url(#ah)"/>';
+      });
+      // 點位：有東西的標編號（到位變綠），空的標 ＋
+      plan.slots.forEach(function(t,i){
+        var g=null; plan.asg.forEach(function(q){ if(q.slot===i) g=q; });
+        var ok=g && g.d<=SUBJ_TOL, r=u*11;
+        s+='<circle cx="'+X(t[0])+'" cy="'+Y(t[1])+'" r="'+r+'" fill="'+(ok?'#86c98b':'rgba(29,24,34,.8)')+'" stroke="#f2b134" stroke-width="'+u*2+'"/>';
+        s+='<text x="'+X(t[0])+'" y="'+(Y(t[1])+u*5)+'" font-size="'+u*14+'" font-weight="700" text-anchor="middle" fill="'+(ok?'#1d1822':'#f2b134')+'">'+(g?plan.asg.indexOf(g)+1:'＋')+'</text>';
+      });
     }
     return s;
   }
@@ -548,9 +615,20 @@ button{font:inherit;color:inherit;cursor:pointer}
   }
 
   // ===== AI 物件辨識（MediaPipe） =====
-  var det=null, detState='idle', detTs=0, detBusy=false, detPromise=null;
+  var det=null, detState='idle', detTs=0, detBusy=false, detPromise=null, detErr='', lastErr='';
+  window.addEventListener('error', function(e){ lastErr=String(e.message||'錯誤'); });
+  window.addEventListener('unhandledrejection', function(e){ lastErr=String(e.reason && e.reason.message || e.reason); });
   function ensureDetector(){
     if(detPromise) return detPromise;
+    // 防當機：載入前先記一筆，成功或失敗才清掉。若上次載到一半瀏覽器當掉，這次跳過 AI（下次再試）
+    if(store.get('fc-det-loading','0')==='1'){
+      store.set('fc-det-loading','0');
+      detErr='上次載入時瀏覽器當掉，這次先跳過；重新開啟頁面會再試';
+      detState='failed';
+      detPromise=Promise.resolve(null);
+      return detPromise;
+    }
+    store.set('fc-det-loading','1');
     detState='loading';
     detPromise = import(MP_URL+'/vision_bundle.mjs').then(function(mp){
       return mp.FilesetResolver.forVisionTasks(MP_URL+'/wasm').then(function(fs){
@@ -559,14 +637,14 @@ button{font:inherit;color:inherit;cursor:pointer}
         // GPU 模式在部分裝置會「不報錯但回傳空結果」，固定用 CPU（模型小，夠快）
         return mk('CPU');
       });
-    }).then(function(d){ det=d; detState='ready'; return d; })
-      .catch(function(e){ console.warn('detector', e); detState='failed'; return null; });
+    }).then(function(d){ store.set('fc-det-loading','0'); det=d; detState='ready'; return d; })
+      .catch(function(e){ store.set('fc-det-loading','0'); console.warn('detector', e); detErr=String(e && e.message || e); detState='failed'; return null; });
     return detPromise;
   }
   function detectTick(){
     if(state.screen!=='cam' || !det || detBusy || !v.videoWidth || !state.frame) return;
     var now=performance.now(); if(now<=detTs) now=detTs+1; detTs=now;
-    try{ state.det = toBoxes(det.detectForVideo(v, now).detections, cropRect()); }catch(e){ console.warn(e); }
+    try{ state.det = toBoxes(det.detectForVideo(v, now).detections, cropRect()); }catch(e){ console.warn(e); lastErr='辨識：'+(e && e.message || e); }
   }
 
   // ===== 比例框 =====
@@ -604,12 +682,21 @@ button{font:inherit;color:inherit;cursor:pointer}
   var hint=$('#hint'), scoreEl=$('#score'), bubble=$('#bubble'), gauge=$('#gauge'), gtxt=$('#gaugeTxt');
 
   function statusText(boxes){
-    if(detState==='loading') return '物件辨識模型下載中（第一次約 5MB）…';
-    var names=boxes.map(function(b){ return b.main ? '主角・'+b.label : b.label; });
-    var pre = detState==='failed' ? '辨識模型載入失敗，改用顏色估計。' : '';
-    if(!names.length) return pre+'還沒找到物件';
-    return pre+'找到 '+names.length+' 樣：'+names.join('、')+'。點框可換主角';
+    var pre='';
+    if(detState==='loading') pre='物件辨識模型下載中（第一次約 5MB）…';
+    else if(detState==='failed') pre='辨識模型載入失敗（'+detErr.slice(0,50)+'），先用顏色估計。';
+    var names=boxes.map(function(b){ return b.label; });
+    var body = names.length ? '找到 '+names.length+' 樣：'+names.join('、')+'。點框可換主角' : '還沒找到物件';
+    return pre+body+(lastErr ? '｜錯誤：'+lastErr.slice(0,60) : '');
   }
+  function compLabel(plan){
+    return state.comp==='auto' ? '構圖：自動'+(plan?'・'+plan.name:'')+' ▸' : '構圖：'+COMP[state.comp].name+' ▸';
+  }
+  $('#compBtn').addEventListener('click', function(){
+    state.comp = COMP_ORDER[(COMP_ORDER.indexOf(state.comp)+1)%COMP_ORDER.length];
+    store.set('fc-comp', state.comp);
+    tick();
+  });
 
   function tick(){
     if(state.screen!=='cam' || !v.videoWidth || !state.frame) return;
@@ -632,6 +719,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     scoreEl.textContent = ev.score;
     scoreEl.className = ev.score>=80 ? 'ok' : (ev.score>=60 ? 'mid' : '');
     st.textContent = statusText(boxes);
+    $('#compBtn').textContent = compLabel(ev.plan);
 
     // 水平儀
     if(ori){
@@ -646,7 +734,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       gauge.hidden = true; gtxt.hidden = true;
     }
     var f=state.frame;
-    ov.innerHTML = overlaySVG(boxes, ev.near, function(x){return f.x+x*f.w;}, function(y){return f.y+y*f.h;}, 1);
+    ov.innerHTML = overlaySVG(boxes, ev.plan, function(x){return f.x+x*f.w;}, function(y){return f.y+y*f.h;}, 1);
   }
 
   // 點某個框 = 指定它當主角；點空白 = 交回自動挑選
@@ -733,11 +821,12 @@ button{font:inherit;color:inherit;cursor:pointer}
     if(sh<50) advice = '畫面偏糊，穩住手機、等對焦完成再按快門';
     else if(ev.issues.length) advice = '下次先改這點：'+ev.issues[0].msg;
     else advice = '技術面都在水準內，可以專心想擺盤和配角';
+    if(ev.plan) advice = '建議構圖：'+ev.plan.name+'。'+advice;
 
     $('#pic').src = imgUrl;
     var W=src.width, H=src.height, rov=$('#rov');
     rov.setAttribute('viewBox','0 0 '+W+' '+H);
-    rov.innerHTML = overlaySVG(boxes, ev.near, function(x){return x*W;}, function(y){return y*H;}, Math.max(W,H)/400);
+    rov.innerHTML = overlaySVG(boxes, ev.plan, function(x){return x*W;}, function(y){return y*H;}, Math.max(W,H)/400);
     rov.hidden = !boxes.length;
     $('#togOv').hidden = !boxes.length;
     $('#togOv').textContent = '隱藏構圖標示';
