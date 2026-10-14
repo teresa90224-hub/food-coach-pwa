@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>餐桌教練</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1d1822">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="餐桌教練">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1d1822; --panel:#2a2330; --line:#463c4e;
+  --ink:#f6efe3; --ink2:#b9afa8;
+  --accent:#f2b134; --ok:#86c98b; --warn:#ef7a52;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.5}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+#app{position:fixed;inset:0;background:var(--bg)}
+.screen{position:absolute;inset:0}
+
+/* 起始頁 */
+#start{display:flex;flex-direction:column;justify-content:center;gap:16px;padding:32px 28px;max-width:480px;margin:0 auto}
+#start h1{font-size:34px;line-height:1.2;margin:0;font-weight:700}
+#start p{margin:0;color:var(--ink2);max-width:36em}
+.primary{background:var(--accent);color:#2b1f05;border:0;border-radius:14px;min-height:52px;font-weight:700;font-size:17px;padding:0 20px}
+.ghost{display:flex;align-items:center;justify-content:center;min-height:48px;border:1px solid var(--line);border-radius:14px;color:var(--ink);padding:0 20px}
+.ghost:focus-within{outline:3px solid var(--accent);outline-offset:2px}
+.err{color:var(--warn);min-height:1.5em}
+
+/* 相機頁 */
+#cam{background:#000}
+#v{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#grid{position:absolute;inset:0;pointer-events:none;
+  background:
+   linear-gradient(to right,transparent calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% + .5px),transparent calc(33.333% + .5px),transparent calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% + .5px),transparent calc(66.666% + .5px)),
+   linear-gradient(to bottom,transparent calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% + .5px),transparent calc(33.333% + .5px),transparent calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% + .5px),transparent calc(66.666% + .5px));}
+#ring{position:absolute;border-radius:50%;border:3px solid var(--accent);pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+#ring.ghosted{border-style:dashed;border-color:rgba(246,239,227,.7)}
+#top{position:absolute;left:0;right:0;top:0;display:flex;gap:10px;align-items:flex-start;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px;pointer-events:none}
+#hint{flex:1;background:rgba(29,24,34,.82);border-radius:14px;padding:12px 14px;font-weight:500;font-size:17px;border-left:5px solid var(--warn)}
+#hint.ok{border-left-color:var(--ok)}
+#hint.info{border-left-color:var(--accent)}
+#score{min-width:58px;height:58px;border-radius:50%;background:rgba(29,24,34,.82);display:grid;place-items:center;font-weight:700;font-size:22px;border:3px solid var(--warn)}
+#score.ok{border-color:var(--ok)}
+#score.mid{border-color:var(--accent)}
+#gauge{position:absolute;left:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 150px);width:72px;height:72px;border-radius:50%;
+  background:rgba(29,24,34,.72);border:2px solid var(--line);pointer-events:none}
+#gauge::before,#gauge::after{content:"";position:absolute;background:rgba(246,239,227,.35)}
+#gauge::before{left:50%;top:8px;bottom:8px;width:1px}
+#gauge::after{top:50%;left:8px;right:8px;height:1px}
+#bubble{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:var(--warn);transition:transform .12s linear,background .12s}
+#bubble.ok{background:var(--ok)}
+#gaugeTxt{position:absolute;left:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 128px);font-size:12px;color:var(--ink);text-shadow:0 1px 3px #000;pointer-events:none}
+#bottom{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);
+  background:linear-gradient(to top,rgba(29,24,34,.92),rgba(29,24,34,.55) 70%,transparent);
+  display:grid;grid-template-columns:1fr auto 1fr;grid-template-areas:"size size size" "seg shot back";align-items:center;gap:12px}
+#sizeBox{grid-area:size;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink2)}
+#sizeBox input{flex:1;accent-color:var(--accent);min-height:32px}
+#seg{grid-area:seg;display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;justify-self:start}
+#seg button{background:transparent;border:0;padding:10px 14px;min-height:44px}
+#seg button[aria-pressed="true"]{background:var(--accent);color:#2b1f05;font-weight:700}
+#shot{grid-area:shot;width:74px;height:74px;border-radius:50%;background:var(--ink);border:5px solid var(--bg);box-shadow:0 0 0 3px var(--ink)}
+#shot:active{transform:scale(.95)}
+#back{grid-area:back;justify-self:end;background:transparent;border:1px solid var(--line);border-radius:12px;min-height:44px;padding:0 14px}
+
+/* 結果頁 */
+#res{display:flex;flex-direction:column;overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 16px) 18px calc(env(safe-area-inset-bottom,0px) + 18px);gap:14px;max-width:520px;margin:0 auto}
+#pic{width:100%;max-height:42vh;object-fit:contain;background:#000;border-radius:14px}
+.big{display:flex;align-items:baseline;gap:10px}
+.big b{font-size:52px;line-height:1}
+.big span{color:var(--ink2)}
+#advice{margin:0;font-size:18px;font-weight:500}
+.bars{display:grid;gap:10px}
+.bar{display:grid;grid-template-columns:64px 1fr 36px;align-items:center;gap:10px;font-size:14px}
+.track{height:10px;background:var(--panel);border-radius:6px;overflow:hidden}
+.fill{height:100%;background:var(--ok)}
+.fill.mid{background:var(--accent)}
+.fill.low{background:var(--warn)}
+.row{display:flex;gap:10px;margin-top:auto}
+.row .primary,.row .ghost{flex:1}
+.note{font-size:12px;color:var(--ink2);margin:0}
+@media (prefers-reduced-motion:reduce){#bubble{transition:none}#shot:active{transform:none}}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <section id="start" class="screen">
+    <h1>餐桌教練</h1>
+    <p>拍美食時，即時告訴你手機角度、光線和盤子位置。不用 AI，全部在手機上計算，照片不會上傳。</p>
+    <button id="go" class="primary" type="button">開始拍攝</button>
+    <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
+    <p id="err" class="err" role="alert"></p>
+  </section>
+
+  <section id="cam" class="screen" hidden>
+    <video id="v" playsinline muted autoplay></video>
+    <div id="grid"></div>
+    <div id="ring" class="ghosted"></div>
+    <div id="top">
+      <div id="hint" class="info">準備中…</div>
+      <div id="score">--</div>
+    </div>
+    <div id="gauge" aria-hidden="true"><div id="bubble"></div></div>
+    <div id="gaugeTxt"></div>
+    <div id="bottom">
+      <label id="sizeBox">盤子大小（對齊圈圈）
+        <input id="size" type="range" min="45" max="95" value="70">
+      </label>
+      <div id="seg" role="group" aria-label="拍攝角度">
+        <button type="button" data-mode="top" aria-pressed="true">俯拍</button>
+        <button type="button" data-mode="angle" aria-pressed="false">45°</button>
+      </div>
+      <button id="shot" type="button" aria-label="拍照"></button>
+      <button id="back" type="button">結束</button>
+    </div>
+  </section>
+
+  <section id="res" class="screen" hidden>
+    <img id="pic" alt="剛拍的照片">
+    <div class="big"><b id="rscore">0</b><span>/ 100</span></div>
+    <p id="advice"></p>
+    <div id="bars" class="bars"></div>
+    <p id="rnote" class="note"></p>
+    <div class="row">
+      <button id="again" class="primary" type="button">再拍一張</button>
+      <button id="home" class="ghost" type="button">回首頁</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  var $ = function(s){return document.querySelector(s);};
+  var clamp = function(x,a,b){return Math.max(a,Math.min(b,x));};
+  var ema = function(p,n,a){return p==null?n:p+(n-p)*(a||.3);};
+
+  // ===== 可調參數（實測後再微調）=====
+  var TOL_DEG   = 4;     // 角度容許誤差（度）
+  var DARK_MEAN = 90;    // 平均亮度低於此值 = 太暗
+  var BRIGHT_MEAN = 175; // 高於此值 = 太亮
+  var HI_CLIP   = 0.08;  // 過曝像素比例上限
+  var BACKLIGHT = 30;    // 邊緣比中心亮多少算逆光
+  var RB_WARM   = 1.55;  // R/B 高於此值 = 偏黃
+  var RB_COOL   = 0.80;  // R/B 低於此值 = 偏藍
+  var SHARP_GOOD = 60;   // 拉普拉斯變異數達到此值視為清晰
+  // ====================================
+
+  var state = {screen:'start', mode:'top', dish:null, d:.7, m:null, stream:null, last:null};
+  var sm = {beta:null, gamma:null, has:false};
+
+  window.addEventListener('deviceorientation', function(e){
+    if(e.beta==null || e.gamma==null) return;
+    sm.beta = ema(sm.beta, e.beta, .25);
+    sm.gamma = ema(sm.gamma, e.gamma, .25);
+    sm.has = true;
+  });
+
+  function show(name){
+    state.screen = name;
+    ['start','cam','res'].forEach(function(n){ $('#'+n).hidden = (n!==name); });
+  }
+
+  // ===== 影像量測 =====
+  var AW=64, AH=48;
+  var ac = document.createElement('canvas'); ac.width=AW; ac.height=AH;
+  var ax = ac.getContext('2d', {willReadFrequently:true});
+  function measure(src){
+    ax.drawImage(src,0,0,AW,AH);
+    var d = ax.getImageData(0,0,AW,AH).data;
+    var sum=0,cs=0,cn=0,es=0,en=0,hi=0,R=0,B=0;
+    for(var y=0;y<AH;y++){
+      for(var x=0;x<AW;x++){
+        var i=(y*AW+x)*4, r=d[i], g=d[i+1], b=d[i+2];
+        var l=.299*r+.587*g+.114*b;
+        sum+=l; R+=r; B+=b;
+        if(l>245) hi++;
+        if(x>AW*.25 && x<AW*.75 && y>AH*.25 && y<AH*.75){cs+=l;cn++;} else {es+=l;en++;}
+      }
+    }
+    var n=AW*AH;
+    return {mean:sum/n, center:cs/cn, edge:es/en, hi:hi/n, rb:R/Math.max(B,1)};
+  }
+  function smoothM(prev,m){
+    if(!prev) return m;
+    var o={}; for(var k in m){ o[k]=ema(prev[k], m[k], .3); } return o;
+  }
+  function sharpness(src){
+    var W=160,H=120, c=document.createElement('canvas'); c.width=W; c.height=H;
+    var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(src,0,0,W,H);
+    var d=x.getImageData(0,0,W,H).data, g=new Float32Array(W*H);
+    for(var i=0;i<W*H;i++){ g[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2]; }
+    var s=0,s2=0,n=0;
+    for(var yy=1;yy<H-1;yy++){
+      for(var xx=1;xx<W-1;xx++){
+        var k=yy*W+xx, v=4*g[k]-g[k-1]-g[k+1]-g[k-W]-g[k+W];
+        s+=v; s2+=v*v; n++;
+      }
+    }
+    var mean=s/n; return s2/n - mean*mean;
+  }
+
+  // ===== 評估 =====
+  // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt}
+  function evaluate(m, ori, opt){
+    opt = opt||{};
+    var issues=[], pa=0, pl=0, pc=0, tilt=null;
+
+    // 角度
+    if(ori){
+      var target = state.mode==='top' ? 0 : 45;
+      var ep = ori.beta - target, er = ori.gamma;
+      tilt = Math.hypot(ep, er);
+      pa = Math.min(35, tilt*3.5);
+      if(tilt > TOL_DEG){
+        if(Math.abs(ep) >= Math.abs(er)){
+          if(state.mode==='top') issues.push({pen:pa, msg:'手機再放平一點，鏡頭正對桌面'});
+          else issues.push({pen:pa, msg: ep>0 ? '鏡頭再往下壓一點' : '鏡頭再往前抬一點'});
+        } else {
+          issues.push({pen:pa, msg:'手機有點歪，轉正'});
+        }
+      }
+    }
+
+    // 光線與色溫
+    if(m){
+      var dev = m.mean<DARK_MEAN ? DARK_MEAN-m.mean : (m.mean>BRIGHT_MEAN ? m.mean-BRIGHT_MEAN : 0);
+      var p1 = Math.min(20, dev*.5);
+      var p2 = m.hi>HI_CLIP ? Math.min(10,(m.hi-HI_CLIP)*100) : 0;
+      var p3 = (m.edge-m.center)>BACKLIGHT ? Math.min(10,(m.edge-m.center-BACKLIGHT)/3) : 0;
+      var p4 = m.rb>RB_WARM ? Math.min(8,(m.rb-RB_WARM)*20) : (m.rb<RB_COOL ? Math.min(8,(RB_COOL-m.rb)*20) : 0);
+      pl = Math.min(30, p1+p2+p3+p4);
+      if(m.mean<DARK_MEAN) issues.push({pen:p1+2, msg:'光線太暗，移到窗邊或開亮一點'});
+      if(p3>0) issues.push({pen:p3+2, msg:'逆光了，換個位置讓光從側面來'});
+      if(m.mean>BRIGHT_MEAN || p2>0) issues.push({pen:p1+p2+2, msg:'太亮或局部過曝，避開直射光'});
+      if(p4>0) issues.push({pen:p4+1, msg: m.rb>RB_WARM ? '畫面偏黃，換白光或靠窗拍' : '畫面偏藍，遠離冷色螢幕光'});
+    }
+
+    // 構圖（需先標出盤子）
+    if(!opt.skipComp){
+      if(!state.dish){
+        pc = 10;
+        issues.push({pen:2, msg:'點一下畫面，標出盤子位置', info:true});
+      } else {
+        var dx=Math.abs(state.dish.x-.5);
+        var dy = state.mode==='top' ? Math.abs(state.dish.y-.5) : Math.max(0, Math.abs(state.dish.y-.55)-.2);
+        var off = Math.max(dx,dy);
+        var po = Math.min(15, off*60);
+        var ps = 0;
+        if(state.d<.55) ps = Math.min(10,(.55-state.d)*60);
+        else if(state.d>.85) ps = Math.min(10,(state.d-.85)*60);
+        pc = Math.min(25, po+ps);
+        if(off>.1) issues.push({pen:po+1, msg: state.mode==='top' ? '盤子移到畫面中間' : '盤子移到畫面中間偏下'});
+        if(state.d<.55) issues.push({pen:ps+1, msg:'再靠近一點，讓盤子填滿畫面'});
+        if(state.d>.85) issues.push({pen:ps+1, msg:'退後一點，盤子別被切到'});
+      }
+    }
+
+    issues.sort(function(a,b){return b.pen-a.pen;});
+    var total = clamp(Math.round(100-pa-pl-pc),0,100);
+    return {
+      score: total, issues: issues, tilt: tilt,
+      parts: {
+        angle: ori ? Math.round(100-pa/35*100) : null,
+        light: m ? Math.round(100-pl/30*100) : null,
+        comp: opt.skipComp ? null : Math.round(100-pc/25*100)
+      }
+    };
+  }
+
+  // ===== 即時迴圈 =====
+  var v=$('#v'), hint=$('#hint'), scoreEl=$('#score'), ring=$('#ring'), bubble=$('#bubble'), gauge=$('#gauge'), gtxt=$('#gaugeTxt');
+
+  function tick(){
+    if(state.screen!=='cam' || !v.videoWidth) return;
+    state.m = smoothM(state.m, measure(v));
+    var ori = sm.has ? {beta:sm.beta, gamma:sm.gamma} : null;
+    var ev = evaluate(state.m, ori);
+    state.last = ev;
+
+    var top = ev.issues[0];
+    if(top && !top.info || (top && top.info && ev.issues.length===1 && ev.score<100)){
+      hint.textContent = top.msg;
+      hint.className = top.info ? 'info' : '';
+    } else {
+      hint.textContent = '很好，現在拍';
+      hint.className = 'ok';
+    }
+    scoreEl.textContent = ev.score;
+    scoreEl.className = ev.score>=80 ? 'ok' : (ev.score>=60 ? 'mid' : '');
+
+    // 水平儀
+    if(ori){
+      gauge.hidden = false; gtxt.hidden = false;
+      var target = state.mode==='top' ? 0 : 45;
+      var gx = clamp(ori.gamma/15,-1,1)*26, gy = clamp((ori.beta-target)/15,-1,1)*26;
+      bubble.style.transform = 'translate('+gx.toFixed(1)+'px,'+gy.toFixed(1)+'px)';
+      var okTilt = ev.tilt<=TOL_DEG;
+      bubble.className = okTilt ? 'ok' : '';
+      gtxt.textContent = '傾斜 '+Math.round(ev.tilt)+'°';
+    } else {
+      gauge.hidden = true; gtxt.hidden = true;
+    }
+    drawRing();
+  }
+
+  function drawRing(){
+    var w=$('#cam').clientWidth, h=$('#cam').clientHeight;
+    var size = state.d*w;
+    var cx = (state.dish?state.dish.x:.5)*w, cy = (state.dish?state.dish.y:.5)*h;
+    ring.style.width = ring.style.height = size+'px';
+    ring.style.left = (cx-size/2)+'px';
+    ring.style.top = (cy-size/2)+'px';
+    ring.className = state.dish ? '' : 'ghosted';
+  }
+
+  $('#cam').addEventListener('pointerdown', function(e){
+    if(e.target.closest('#bottom') || e.target.closest('#top')) return;
+    var r=$('#cam').getBoundingClientRect();
+    state.dish = {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height};
+    drawRing();
+  });
+  $('#size').addEventListener('input', function(e){ state.d = e.target.value/100; drawRing(); });
+  document.querySelectorAll('#seg button').forEach(function(b){
+    b.addEventListener('click', function(){
+      state.mode = b.dataset.mode;
+      document.querySelectorAll('#seg button').forEach(function(x){ x.setAttribute('aria-pressed', x===b ? 'true':'false'); });
+    });
+  });
+  setInterval(tick, 150);
+  window.addEventListener('resize', function(){ if(state.screen==='cam') drawRing(); });
+
+  // ===== 啟動相機 =====
+  $('#go').addEventListener('click', async function(){
+    $('#err').textContent='';
+    try{
+      if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+        try{ await DeviceOrientationEvent.requestPermission(); }catch(e){}
+      }
+    }catch(e){}
+    try{
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}}, audio:false
+      });
+      v.srcObject = state.stream;
+      await v.play();
+      state.m=null;
+      show('cam');
+    }catch(e){
+      $('#err').textContent = '無法開啟相機，可能被瀏覽器擋住。請用手機直接開這個頁面，或先用下方相簿照片測試。';
+    }
+  });
+
+  function stopCam(){
+    if(state.stream){ state.stream.getTracks().forEach(function(t){t.stop();}); state.stream=null; }
+  }
+  $('#back').addEventListener('click', function(){ stopCam(); show('start'); });
+
+  // ===== 拍照與結果 =====
+  function barRow(label, val){
+    var cls = val>=80 ? '' : (val>=60 ? 'mid' : 'low');
+    var row=document.createElement('div'); row.className='bar';
+    var a=document.createElement('span'); a.textContent=label;
+    var t=document.createElement('div'); t.className='track';
+    var f=document.createElement('div'); f.className='fill '+cls; f.style.width=val+'%'; t.appendChild(f);
+    var n=document.createElement('span'); n.textContent=val;
+    row.appendChild(a); row.appendChild(t); row.appendChild(n);
+    return row;
+  }
+
+  function finish(src, imgUrl, opt){
+    opt = opt||{};
+    var m = measure(src);
+    var ori = (!opt.noAngle && sm.has) ? {beta:sm.beta, gamma:sm.gamma} : null;
+    var ev = evaluate(m, ori, {skipComp: opt.skipComp});
+    var sh = clamp(Math.round(sharpness(src)/SHARP_GOOD*100),0,100);
+
+    var parts = [];
+    if(ev.parts.angle!=null) parts.push(['角度', ev.parts.angle]);
+    if(ev.parts.light!=null) parts.push(['光線', ev.parts.light]);
+    if(ev.parts.comp!=null)  parts.push(['構圖', ev.parts.comp]);
+    parts.push(['清晰度', sh]);
+    var total = Math.round(parts.reduce(function(s,p){return s+p[1];},0)/parts.length);
+
+    var advice;
+    if(sh<50) advice = '畫面偏糊，穩住手機、等對焦完成再按快門';
+    else if(ev.issues.length && !ev.issues[0].info) advice = '下次先改這點：'+ev.issues[0].msg;
+    else advice = '技術面都在水準內，可以專心想擺盤和配角';
+
+    $('#pic').src = imgUrl;
+    $('#rscore').textContent = total;
+    $('#advice').textContent = advice;
+    var bars=$('#bars'); bars.textContent='';
+    parts.forEach(function(p){ bars.appendChild(barRow(p[0],p[1])); });
+    $('#rnote').textContent = opt.note || '評分只看技術面（角度、光線、構圖、清晰度），不評好不好看。長按照片可儲存。';
+    show('res');
+  }
+
+  $('#shot').addEventListener('click', function(){
+    if(!v.videoWidth) return;
+    var c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight;
+    c.getContext('2d').drawImage(v,0,0);
+    finish(c, c.toDataURL('image/jpeg',.92));
+  });
+
+  $('#file').addEventListener('change', async function(e){
+    var f=e.target.files && e.target.files[0]; if(!f) return;
+    try{
+      var bmp = await createImageBitmap(f);
+      var c=document.createElement('canvas'); c.width=bmp.width; c.height=bmp.height;
+      c.getContext('2d').drawImage(bmp,0,0);
+      finish(c, URL.createObjectURL(f), {noAngle:true, skipComp:true, note:'相簿照片沒有角度資料，也無法標盤子，所以只評光線和清晰度。'});
+    }catch(err){
+      $('#err').textContent='這張照片讀不進來，換一張試試。';
+    }
+    e.target.value='';
+  });
+
+  $('#again').addEventListener('click', function(){ if(state.stream) show('cam'); else show('start'); });
+  $('#home').addEventListener('click', function(){ stopCam(); show('start'); });
+})();
+if('serviceWorker' in navigator){ window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
+</script>
+</body>
+</html>
