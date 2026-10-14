@@ -46,12 +46,16 @@ button{font:inherit;color:inherit;cursor:pointer}
 /* 相機頁 */
 #cam{background:#000}
 #v{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#frame{position:absolute;pointer-events:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);outline:1px solid rgba(246,239,227,.6)}
 #grid{position:absolute;inset:0;pointer-events:none;
   background:
    linear-gradient(to right,transparent calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% + .5px),transparent calc(33.333% + .5px),transparent calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% + .5px),transparent calc(66.666% + .5px)),
    linear-gradient(to bottom,transparent calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% + .5px),transparent calc(33.333% + .5px),transparent calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% + .5px),transparent calc(66.666% + .5px));}
-#ring{position:absolute;border-radius:50%;border:3px solid var(--accent);pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
-#ring.ghosted{border-style:dashed;border-color:rgba(246,239,227,.7)}
+#frame .tgt{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid rgba(246,239,227,.85);box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(0,0,0,.5);display:none}
+#frame.has-subj .tgt{display:block}
+#frame .tgt.near{background:var(--accent);border-color:var(--accent)}
+#subj{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;border:3px solid var(--accent);pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+#subj::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:var(--accent)}
 #top{position:absolute;left:0;right:0;top:0;display:flex;gap:10px;align-items:flex-start;
   padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px;pointer-events:none}
 #hint{flex:1;background:rgba(29,24,34,.82);border-radius:14px;padding:12px 14px;font-weight:500;font-size:17px;border-left:5px solid var(--warn)}
@@ -70,9 +74,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 #gaugeTxt{position:absolute;left:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 128px);font-size:12px;color:var(--ink);text-shadow:0 1px 3px #000;pointer-events:none}
 #bottom{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);
   background:linear-gradient(to top,rgba(29,24,34,.92),rgba(29,24,34,.55) 70%,transparent);
-  display:grid;grid-template-columns:1fr auto 1fr;grid-template-areas:"size size size" "seg shot back";align-items:center;gap:12px}
-#sizeBox{grid-area:size;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink2)}
-#sizeBox input{flex:1;accent-color:var(--accent);min-height:32px}
+  display:grid;grid-template-columns:1fr auto 1fr;grid-template-areas:"ratio ratio ratio" "seg shot back";align-items:center;gap:12px}
+#ratios{grid-area:ratio;display:flex;gap:6px;justify-content:center}
+#ratios button{flex:1;max-width:60px;min-height:40px;padding:0;font-size:13px;background:rgba(29,24,34,.6);border:1px solid var(--line);border-radius:10px}
+#ratios button[aria-pressed="true"]{background:var(--accent);color:#2b1f05;font-weight:700;border-color:var(--accent)}
 #seg{grid-area:seg;display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;justify-self:start}
 #seg button{background:transparent;border:0;padding:10px 14px;min-height:44px}
 #seg button[aria-pressed="true"]{background:var(--accent);color:#2b1f05;font-weight:700}
@@ -104,7 +109,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   <section id="start" class="screen">
     <h1>餐桌教練</h1>
-    <p>拍美食時，即時告訴你手機角度、光線和盤子位置。不用 AI，全部在手機上計算，照片不會上傳。</p>
+    <p>拍美食時，即時告訴你手機角度、光線和構圖（平衡、切邊、留白）。可選畫面比例，點一下主菜可標成主角。不用 AI，全部在手機上計算，照片不會上傳。</p>
     <button id="go" class="primary" type="button">開始拍攝</button>
     <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
     <p id="err" class="err" role="alert"></p>
@@ -112,8 +117,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   <section id="cam" class="screen" hidden>
     <video id="v" playsinline muted autoplay></video>
-    <div id="grid"></div>
-    <div id="ring" class="ghosted"></div>
+    <div id="frame"><div id="grid"></div></div>
+    <div id="subj" hidden></div>
     <div id="top">
       <div id="hint" class="info">準備中…</div>
       <div id="score">--</div>
@@ -121,9 +126,14 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="gauge" aria-hidden="true"><div id="bubble"></div></div>
     <div id="gaugeTxt"></div>
     <div id="bottom">
-      <label id="sizeBox">盤子大小（對齊圈圈）
-        <input id="size" type="range" min="45" max="95" value="70">
-      </label>
+      <div id="ratios" role="group" aria-label="畫面比例">
+        <button type="button" data-r="1:1">1:1</button>
+        <button type="button" data-r="4:5">4:5</button>
+        <button type="button" data-r="3:4">3:4</button>
+        <button type="button" data-r="9:16">9:16</button>
+        <button type="button" data-r="4:3">4:3</button>
+        <button type="button" data-r="16:9">16:9</button>
+      </div>
       <div id="seg" role="group" aria-label="拍攝角度">
         <button type="button" data-mode="top" aria-pressed="true">俯拍</button>
         <button type="button" data-mode="angle" aria-pressed="false">45°</button>
@@ -162,9 +172,25 @@ button{font:inherit;color:inherit;cursor:pointer}
   var RB_WARM   = 1.55;  // R/B 高於此值 = 偏黃
   var RB_COOL   = 0.80;  // R/B 低於此值 = 偏藍
   var SHARP_GOOD = 60;   // 拉普拉斯變異數達到此值視為清晰
+  var SAL_MIN   = 45;    // 與桌面差多少（色差+邊緣）才算「有東西」
+  var COV_MIN   = 0.15;  // 物件佔畫面比例低於此 = 太空
+  var COV_MAX   = 0.65;  // 高於此 = 太擠
+  var BAL_TOL   = 0.10;  // 視覺重心離目標多遠才算偏
+  var EDGE_CUT  = 0.30;  // 某一邊有多少比例被物件佔住 = 被切到
+  var SUBJ_TOL  = 0.08;  // 主角離最近黃點多遠才提醒
+  var SUBJ_COL  = 60;    // 追蹤主角時的顏色容差
   // ====================================
 
-  var state = {screen:'start', mode:'top', dish:null, d:.7, m:null, stream:null, last:null};
+  var RATIOS = {'1:1':1, '4:5':4/5, '3:4':3/4, '9:16':9/16, '4:3':4/3, '16:9':16/9};
+  var TARGETS = [[1/3,1/3],[2/3,1/3],[1/3,2/3],[2/3,2/3],[.5,.5]];
+  var store = {
+    get:function(k,d){ try{ var v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } },
+    set:function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  };
+  var state = {screen:'start', mode:store.get('fc-mode','top'), ratio:store.get('fc-ratio','3:4'),
+               subj:null, frame:null, m:null, stream:null, last:null};
+  if(!RATIOS[state.ratio]) state.ratio='3:4';
+  if(state.mode!=='top' && state.mode!=='angle') state.mode='top';
   var sm = {beta:null, gamma:null, has:false};
 
   window.addEventListener('deviceorientation', function(e){
@@ -177,34 +203,74 @@ button{font:inherit;color:inherit;cursor:pointer}
   function show(name){
     state.screen = name;
     ['start','cam','res'].forEach(function(n){ $('#'+n).hidden = (n!==name); });
+    if(name==='cam') layoutFrame();
   }
 
   // ===== 影像量測 =====
-  var AW=64, AH=48;
-  var ac = document.createElement('canvas'); ac.width=AW; ac.height=AH;
+  // rc = 要分析的範圍（來源像素座標）。回傳光線數值 + 構圖數值，構圖座標都是相對於 rc 的 0~1。
+  var ac = document.createElement('canvas');
   var ax = ac.getContext('2d', {willReadFrequently:true});
-  function measure(src){
-    ax.drawImage(src,0,0,AW,AH);
-    var d = ax.getImageData(0,0,AW,AH).data;
+  function median(a){ a.sort(function(x,y){return x-y;}); return a[a.length>>1]; }
+  function measure(src, rc){
+    var W,H;
+    if(rc.w>=rc.h){ W=64; H=Math.max(24,Math.round(64*rc.h/rc.w)); }
+    else { H=64; W=Math.max(24,Math.round(64*rc.w/rc.h)); }
+    if(ac.width!==W) ac.width=W;
+    if(ac.height!==H) ac.height=H;
+    ax.drawImage(src, rc.x,rc.y,rc.w,rc.h, 0,0,W,H);
+    var d = ax.getImageData(0,0,W,H).data, n=W*H;
+    var L = new Float32Array(n);
     var sum=0,cs=0,cn=0,es=0,en=0,hi=0,R=0,B=0;
-    for(var y=0;y<AH;y++){
-      for(var x=0;x<AW;x++){
-        var i=(y*AW+x)*4, r=d[i], g=d[i+1], b=d[i+2];
+    var br=[],bgc=[],bb=[];
+    for(var y=0;y<H;y++){
+      for(var x=0;x<W;x++){
+        var k=y*W+x, i=k*4, r=d[i], g=d[i+1], b=d[i+2];
         var l=.299*r+.587*g+.114*b;
-        sum+=l; R+=r; B+=b;
+        L[k]=l; sum+=l; R+=r; B+=b;
         if(l>245) hi++;
-        if(x>AW*.25 && x<AW*.75 && y>AH*.25 && y<AH*.75){cs+=l;cn++;} else {es+=l;en++;}
+        if(x>W*.25 && x<W*.75 && y>H*.25 && y<H*.75){cs+=l;cn++;} else {es+=l;en++;}
+        if(x===0 || y===0 || x===W-1 || y===H-1){ br.push(r); bgc.push(g); bb.push(b); }
       }
     }
-    var n=AW*AH;
-    return {mean:sum/n, center:cs/cn, edge:es/en, hi:hi/n, rb:R/Math.max(B,1)};
+    // 桌面色 = 邊框像素的中位數；與桌面色差越大、邊緣越多，越像「物件」
+    var mr=median(br), mg=median(bgc), mb=median(bb);
+    var S = new Float32Array(n);
+    for(var y2=0;y2<H;y2++){
+      for(var x2=0;x2<W;x2++){
+        var k2=y2*W+x2, i2=k2*4;
+        var cd=Math.hypot(d[i2]-mr, d[i2+1]-mg, d[i2+2]-mb);
+        var gx = (x2>0 && x2<W-1) ? L[k2+1]-L[k2-1] : 0;
+        var gy = (y2>0 && y2<H-1) ? L[k2+W]-L[k2-W] : 0;
+        S[k2] = cd + .5*(Math.abs(gx)+Math.abs(gy));
+      }
+    }
+    var sorted = Array.prototype.slice.call(S).sort(function(a,b){return a-b;});
+    var thr = Math.max(SAL_MIN, .5*sorted[Math.floor(n*.95)]);
+    var ws=0,wx=0,wy=0,cnt=0,eT=0,eB=0,eL=0,eR=0;
+    for(var y3=0;y3<H;y3++){
+      for(var x3=0;x3<W;x3++){
+        var s=S[y3*W+x3], w=Math.max(0, s-SAL_MIN*.5);
+        ws+=w; wx+=w*(x3+.5)/W; wy+=w*(y3+.5)/H;
+        if(s>thr){
+          cnt++;
+          if(y3<2) eT++; if(y3>=H-2) eB++;
+          if(x3<2) eL++; if(x3>=W-2) eR++;
+        }
+      }
+    }
+    return {
+      mean:sum/n, center:cs/cn, edge:es/en, hi:hi/n, rb:R/Math.max(B,1),
+      cov:cnt/n, cx: ws>0 ? wx/ws : .5, cy: ws>0 ? wy/ws : .5,
+      eT:eT/(2*W), eB:eB/(2*W), eL:eL/(2*H), eR:eR/(2*H),
+      W:W, H:H, px:new Uint8ClampedArray(d), S:S, thr:thr
+    };
   }
   function smoothM(prev,m){
     if(!prev) return m;
-    var o={}; for(var k in m){ o[k]=ema(prev[k], m[k], .3); } return o;
+    var o={}; for(var k in m){ o[k] = typeof m[k]==='number' && k!=='W' && k!=='H' && k!=='thr' ? ema(prev[k], m[k], .3) : m[k]; } return o;
   }
   function sharpness(src){
-    var W=160,H=120, c=document.createElement('canvas'); c.width=W; c.height=H;
+    var W=160,H=Math.max(40,Math.round(160*src.height/src.width)), c=document.createElement('canvas'); c.width=W; c.height=H;
     var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(src,0,0,W,H);
     var d=x.getImageData(0,0,W,H).data, g=new Float32Array(W*H);
     for(var i=0;i<W*H;i++){ g[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2]; }
@@ -218,11 +284,35 @@ button{font:inherit;color:inherit;cursor:pointer}
     var mean=s/n; return s2/n - mean*mean;
   }
 
+  // 主角追蹤：在上次位置附近找顏色相近、且不像桌面的像素，取重心
+  function sampleColor(m, fx, fy){
+    var x0=Math.round(fx*m.W), y0=Math.round(fy*m.H), r=0,g=0,b=0,c=0;
+    for(var y=y0-1;y<=y0+1;y++) for(var x=x0-1;x<=x0+1;x++){
+      if(x<0||y<0||x>=m.W||y>=m.H) continue;
+      var i=(y*m.W+x)*4; r+=m.px[i]; g+=m.px[i+1]; b+=m.px[i+2]; c++;
+    }
+    return c ? [r/c,g/c,b/c] : null;
+  }
+  function trackSubj(m){
+    var s=state.subj; if(!s || !m || !m.px) return;
+    var Rd=.15, x0=Math.max(0,Math.floor((s.x-Rd)*m.W)), x1=Math.min(m.W-1,Math.ceil((s.x+Rd)*m.W));
+    var y0=Math.max(0,Math.floor((s.y-Rd)*m.H)), y1=Math.min(m.H-1,Math.ceil((s.y+Rd)*m.H));
+    var sx=0,sy=0,sw=0;
+    for(var y=y0;y<=y1;y++) for(var x=x0;x<=x1;x++){
+      var k=y*m.W+x, i=k*4;
+      if(m.S[k]<=m.thr) continue;
+      var dc=Math.hypot(m.px[i]-s.col[0], m.px[i+1]-s.col[1], m.px[i+2]-s.col[2]);
+      if(dc>=SUBJ_COL) continue;
+      var w=1-dc/SUBJ_COL; sx+=w*(x+.5)/m.W; sy+=w*(y+.5)/m.H; sw+=w;
+    }
+    if(sw>2){ s.x=ema(s.x, sx/sw, .35); s.y=ema(s.y, sy/sw, .35); }
+  }
+
   // ===== 評估 =====
-  // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt}
+  // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt, near}
   function evaluate(m, ori, opt){
     opt = opt||{};
-    var issues=[], pa=0, pl=0, pc=0, tilt=null;
+    var issues=[], pa=0, pl=0, pc=0, tilt=null, near=-1;
 
     // 角度
     if(ori){
@@ -255,46 +345,103 @@ button{font:inherit;color:inherit;cursor:pointer}
       if(p4>0) issues.push({pen:p4+1, msg: m.rb>RB_WARM ? '畫面偏黃，換白光或靠窗拍' : '畫面偏藍，遠離冷色螢幕光'});
     }
 
-    // 構圖（需先標出盤子）
-    if(!opt.skipComp){
-      if(!state.dish){
-        pc = 10;
-        issues.push({pen:2, msg:'點一下畫面，標出盤子位置', info:true});
-      } else {
-        var dx=Math.abs(state.dish.x-.5);
-        var dy = state.mode==='top' ? Math.abs(state.dish.y-.5) : Math.max(0, Math.abs(state.dish.y-.55)-.2);
-        var off = Math.max(dx,dy);
-        var po = Math.min(15, off*60);
-        var ps = 0;
-        if(state.d<.55) ps = Math.min(10,(.55-state.d)*60);
-        else if(state.d>.85) ps = Math.min(10,(state.d-.85)*60);
-        pc = Math.min(25, po+ps);
-        if(off>.1) issues.push({pen:po+1, msg: state.mode==='top' ? '盤子移到畫面中間' : '盤子移到畫面中間偏下'});
-        if(state.d<.55) issues.push({pen:ps+1, msg:'再靠近一點，讓盤子填滿畫面'});
-        if(state.d>.85) issues.push({pen:ps+1, msg:'退後一點，盤子別被切到'});
+    // 構圖：自動看留白、重心平衡、切邊；有標主角再看主角位置
+    if(m){
+      var pf=0, pb=0, pe=0, ps=0;
+      if(m.cov<COV_MIN){
+        pf=Math.min(7,(COV_MIN-m.cov)*60);
+        issues.push({pen:pf+1, msg:'畫面太空：靠近一點，或多擺幾樣'});
+      } else if(m.cov>COV_MAX){
+        pf=Math.min(7,(m.cov-COV_MAX)*30);
+        issues.push({pen:pf+1, msg:'太擠了：退後一點，或拿掉一兩樣'});
       }
+      if(m.cov>=.05){
+        var ty = state.mode==='top' ? .5 : .55;
+        var bx=m.cx-.5, by=m.cy-ty, off=Math.max(Math.abs(bx),Math.abs(by));
+        if(off>BAL_TOL){
+          pb=Math.min(8,(off-BAL_TOL)*60);
+          var bm = Math.abs(bx)>=Math.abs(by)
+            ? (bx<0 ? '東西都偏左：手機往左移，或在右邊補個配角' : '東西都偏右：手機往右移，或在左邊補個配角')
+            : (by<0 ? '東西都偏上：手機往上移，或在下方補點東西' : '東西都偏下：手機往下移，或在上方補點東西');
+          issues.push({pen:pb+1, msg:bm});
+        }
+        var sides=[['上緣',m.eT,'往上移'],['下緣',m.eB,'往下移'],['左緣',m.eL,'往左移'],['右緣',m.eR,'往右移']];
+        sides.sort(function(a,b){return b[1]-a[1];});
+        if(sides[0][1]>EDGE_CUT){
+          pe=Math.min(6,(sides[0][1]-EDGE_CUT)*25);
+          issues.push({pen:pe+1, msg:sides[0][0]+'有東西被切到：退後一點，或手機'+sides[0][2]});
+        }
+      }
+      if(opt.subj){
+        var best=9;
+        TARGETS.forEach(function(t,i){ var dd=Math.hypot(opt.subj.x-t[0], opt.subj.y-t[1]); if(dd<best){best=dd; near=i;} });
+        if(best>SUBJ_TOL){
+          ps=Math.min(10,(best-SUBJ_TOL)*50);
+          issues.push({pen:ps+1, msg:'主角對準最近的黃點（三分線交點或正中間）'});
+        }
+      } else if(!opt.noSubjHint){
+        issues.push({pen:.5, msg:'可點一下主菜，標成主角（選用）', info:true});
+      }
+      pc = Math.min(25, pf+pb+pe+ps);
     }
 
     issues.sort(function(a,b){return b.pen-a.pen;});
     var total = clamp(Math.round(100-pa-pl-pc),0,100);
     return {
-      score: total, issues: issues, tilt: tilt,
+      score: total, issues: issues, tilt: tilt, near: near,
       parts: {
         angle: ori ? Math.round(100-pa/35*100) : null,
         light: m ? Math.round(100-pl/30*100) : null,
-        comp: opt.skipComp ? null : Math.round(100-pc/25*100)
+        comp: m ? Math.round(100-pc/25*100) : null
       }
     };
   }
 
+  // ===== 比例框 =====
+  var v=$('#v'), cam=$('#cam'), frameEl=$('#frame'), subjEl=$('#subj');
+  TARGETS.forEach(function(t){
+    var e=document.createElement('div'); e.className='tgt';
+    e.style.left=(t[0]*100)+'%'; e.style.top=(t[1]*100)+'%';
+    frameEl.appendChild(e);
+  });
+  var tgtEls = frameEl.querySelectorAll('.tgt');
+
+  // 框在畫面上的位置（相機頁座標）
+  function layoutFrame(){
+    var W=cam.clientWidth, H=cam.clientHeight, r=RATIOS[state.ratio];
+    var fw=W, fh=W/r;
+    if(fh>H){ fh=H; fw=H*r; }
+    state.frame = {x:(W-fw)/2, y:(H-fh)/2, w:fw, h:fh};
+    frameEl.style.left=state.frame.x+'px'; frameEl.style.top=state.frame.y+'px';
+    frameEl.style.width=fw+'px'; frameEl.style.height=fh+'px';
+  }
+  // 框對應到影片原始像素的範圍（影片是 object-fit:cover）
+  function cropRect(){
+    var W=cam.clientWidth, H=cam.clientHeight, vw=v.videoWidth, vh=v.videoHeight;
+    var sc=Math.max(W/vw, H/vh), ox=(W-vw*sc)/2, oy=(H-vh*sc)/2, f=state.frame;
+    var x=clamp((f.x-ox)/sc,0,vw), y=clamp((f.y-oy)/sc,0,vh);
+    return {x:x, y:y, w:Math.min(vw-x, f.w/sc), h:Math.min(vh-y, f.h/sc)};
+  }
+  function setRatio(r){
+    state.ratio=r; store.set('fc-ratio', r);
+    state.subj=null; state.m=null;
+    document.querySelectorAll('#ratios button').forEach(function(x){ x.setAttribute('aria-pressed', x.dataset.r===r ? 'true':'false'); });
+    if(state.screen==='cam') layoutFrame();
+  }
+  function setMode(md){
+    state.mode=md; store.set('fc-mode', md);
+    document.querySelectorAll('#seg button').forEach(function(x){ x.setAttribute('aria-pressed', x.dataset.mode===md ? 'true':'false'); });
+  }
+
   // ===== 即時迴圈 =====
-  var v=$('#v'), hint=$('#hint'), scoreEl=$('#score'), ring=$('#ring'), bubble=$('#bubble'), gauge=$('#gauge'), gtxt=$('#gaugeTxt');
+  var hint=$('#hint'), scoreEl=$('#score'), bubble=$('#bubble'), gauge=$('#gauge'), gtxt=$('#gaugeTxt');
 
   function tick(){
-    if(state.screen!=='cam' || !v.videoWidth) return;
-    state.m = smoothM(state.m, measure(v));
+    if(state.screen!=='cam' || !v.videoWidth || !state.frame) return;
+    state.m = smoothM(state.m, measure(v, cropRect()));
+    trackSubj(state.m);
     var ori = sm.has ? {beta:sm.beta, gamma:sm.gamma} : null;
-    var ev = evaluate(state.m, ori);
+    var ev = evaluate(state.m, ori, {subj:state.subj});
     state.last = ev;
 
     var top = ev.issues[0];
@@ -320,34 +467,40 @@ button{font:inherit;color:inherit;cursor:pointer}
     } else {
       gauge.hidden = true; gtxt.hidden = true;
     }
-    drawRing();
+    drawSubj(ev.near);
   }
 
-  function drawRing(){
-    var w=$('#cam').clientWidth, h=$('#cam').clientHeight;
-    var size = state.d*w;
-    var cx = (state.dish?state.dish.x:.5)*w, cy = (state.dish?state.dish.y:.5)*h;
-    ring.style.width = ring.style.height = size+'px';
-    ring.style.left = (cx-size/2)+'px';
-    ring.style.top = (cy-size/2)+'px';
-    ring.className = state.dish ? '' : 'ghosted';
+  function drawSubj(near){
+    var s=state.subj, f=state.frame;
+    frameEl.classList.toggle('has-subj', !!s);
+    subjEl.hidden = !s;
+    tgtEls.forEach(function(e,i){ e.classList.toggle('near', i===near); });
+    if(!s || !f) return;
+    subjEl.style.left=(f.x+s.x*f.w)+'px';
+    subjEl.style.top=(f.y+s.y*f.h)+'px';
   }
 
-  $('#cam').addEventListener('pointerdown', function(e){
-    if(e.target.closest('#bottom') || e.target.closest('#top')) return;
-    var r=$('#cam').getBoundingClientRect();
-    state.dish = {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height};
-    drawRing();
+  // 點框內 = 標主角；點在主角上 = 取消
+  cam.addEventListener('pointerdown', function(e){
+    if(e.target.closest('#bottom') || e.target.closest('#top') || !state.frame) return;
+    var r=cam.getBoundingClientRect(), f=state.frame;
+    var fx=(e.clientX-r.left-f.x)/f.w, fy=(e.clientY-r.top-f.y)/f.h;
+    if(fx<0||fy<0||fx>1||fy>1) return;
+    if(state.subj && Math.hypot((fx-state.subj.x)*f.w, (fy-state.subj.y)*f.h) < 30){ state.subj=null; drawSubj(-1); return; }
+    var col = state.m ? sampleColor(state.m, fx, fy) : null;
+    if(!col) return;
+    state.subj = {x:fx, y:fy, col:col};
+    drawSubj(-1);
   });
-  $('#size').addEventListener('input', function(e){ state.d = e.target.value/100; drawRing(); });
+  document.querySelectorAll('#ratios button').forEach(function(b){
+    b.addEventListener('click', function(){ setRatio(b.dataset.r); });
+  });
   document.querySelectorAll('#seg button').forEach(function(b){
-    b.addEventListener('click', function(){
-      state.mode = b.dataset.mode;
-      document.querySelectorAll('#seg button').forEach(function(x){ x.setAttribute('aria-pressed', x===b ? 'true':'false'); });
-    });
+    b.addEventListener('click', function(){ setMode(b.dataset.mode); });
   });
+  setRatio(state.ratio); setMode(state.mode);
   setInterval(tick, 150);
-  window.addEventListener('resize', function(){ if(state.screen==='cam') drawRing(); });
+  window.addEventListener('resize', function(){ if(state.screen==='cam'){ layoutFrame(); drawSubj(state.last?state.last.near:-1); } });
 
   // ===== 啟動相機 =====
   $('#go').addEventListener('click', async function(){
@@ -359,7 +512,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     }catch(e){}
     try{
       state.stream = await navigator.mediaDevices.getUserMedia({
-        video:{facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}}, audio:false
+        video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false
       });
       v.srcObject = state.stream;
       await v.play();
@@ -389,9 +542,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   function finish(src, imgUrl, opt){
     opt = opt||{};
-    var m = measure(src);
+    var m = measure(src, {x:0, y:0, w:src.width, h:src.height});
     var ori = (!opt.noAngle && sm.has) ? {beta:sm.beta, gamma:sm.gamma} : null;
-    var ev = evaluate(m, ori, {skipComp: opt.skipComp});
+    var ev = evaluate(m, ori, {subj: opt.album ? null : state.subj, noSubjHint:true});
     var sh = clamp(Math.round(sharpness(src)/SHARP_GOOD*100),0,100);
 
     var parts = [];
@@ -411,15 +564,16 @@ button{font:inherit;color:inherit;cursor:pointer}
     $('#advice').textContent = advice;
     var bars=$('#bars'); bars.textContent='';
     parts.forEach(function(p){ bars.appendChild(barRow(p[0],p[1])); });
-    var modeTxt = ev.parts.angle!=null ? '本次以「'+(state.mode==='top'?'俯拍（手機平放）':'45°')+'」模式評角度。' : '';
+    var modeTxt = ev.parts.angle!=null ? '本次以「'+(state.mode==='top'?'俯拍（手機平放）':'45°')+'」模式評角度，比例 '+state.ratio+'。' : '';
     $('#rnote').textContent = opt.note || (modeTxt+'評分只看技術面（角度、光線、構圖、清晰度），不評好不好看。長按照片可儲存。');
     show('res');
   }
 
   $('#shot').addEventListener('click', function(){
-    if(!v.videoWidth) return;
-    var c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight;
-    c.getContext('2d').drawImage(v,0,0);
+    if(!v.videoWidth || !state.frame) return;
+    var rc=cropRect(), c=document.createElement('canvas');
+    c.width=Math.round(rc.w); c.height=Math.round(rc.h);
+    c.getContext('2d').drawImage(v, rc.x,rc.y,rc.w,rc.h, 0,0,c.width,c.height);
     finish(c, c.toDataURL('image/jpeg',.92));
   });
 
@@ -429,7 +583,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       var bmp = await createImageBitmap(f);
       var c=document.createElement('canvas'); c.width=bmp.width; c.height=bmp.height;
       c.getContext('2d').drawImage(bmp,0,0);
-      finish(c, URL.createObjectURL(f), {noAngle:true, skipComp:true, note:'相簿照片沒有角度資料，也無法標盤子，所以只評光線和清晰度。'});
+      finish(c, URL.createObjectURL(f), {noAngle:true, album:true, note:'相簿照片沒有角度資料，所以只評光線、構圖（自動判斷，沒有主角）和清晰度。'});
     }catch(err){
       $('#err').textContent='這張照片讀不進來，換一張試試。';
     }
