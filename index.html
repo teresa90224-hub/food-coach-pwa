@@ -45,8 +45,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 
 /* 相機頁 */
 #cam{background:#000}
-#v{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-#frame{position:absolute;pointer-events:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);outline:1px solid rgba(246,239,227,.6)}
+#v{position:absolute;object-fit:cover;background:#000}
+#frame{position:absolute;pointer-events:none;outline:1px solid rgba(246,239,227,.6)}
 #grid{position:absolute;inset:0;pointer-events:none;
   background:
    linear-gradient(to right,transparent calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% - .5px),rgba(246,239,227,.35) calc(33.333% + .5px),transparent calc(33.333% + .5px),transparent calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% - .5px),rgba(246,239,227,.35) calc(66.666% + .5px),transparent calc(66.666% + .5px)),
@@ -54,7 +54,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 #ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;font-family:inherit}
 #hintCol{flex:1;display:flex;flex-direction:column;gap:6px}
 #status{font-size:13px;color:var(--ink);text-shadow:0 1px 3px #000;pointer-events:none}
-#compBtn{align-self:flex-start;pointer-events:auto;background:rgba(29,24,34,.85);border:1px solid var(--accent);color:var(--ink);border-radius:999px;min-height:36px;padding:0 14px;font-size:14px;font-weight:500}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+#compBtn,#ovBtn{pointer-events:auto;background:rgba(29,24,34,.85);border:1px solid var(--accent);color:var(--ink);border-radius:999px;min-height:36px;padding:0 14px;font-size:14px;font-weight:500}
 .ver{font-size:12px;color:var(--ink2)}
 #top{position:absolute;left:0;right:0;top:0;display:flex;gap:10px;align-items:flex-start;
   padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px;pointer-events:none}
@@ -116,7 +117,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button id="go" class="primary" type="button">開始拍攝</button>
     <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
     <p id="err" class="err" role="alert"></p>
-    <p class="ver">版本 2026-10-14g</p>
+    <p class="ver">版本 2026-10-14h</p>
   </section>
 
   <section id="cam" class="screen" hidden>
@@ -127,7 +128,10 @@ button{font:inherit;color:inherit;cursor:pointer}
       <div id="hintCol">
         <div id="hint" class="info">準備中…</div>
         <div id="status" aria-live="polite"></div>
-        <button id="compBtn" type="button">構圖：自動</button>
+        <div class="chips">
+          <button id="compBtn" type="button">構圖：自動</button>
+          <button id="ovBtn" type="button" aria-pressed="true">標示：開</button>
+        </div>
       </div>
       <div id="score">--</div>
     </div>
@@ -221,7 +225,7 @@ button{font:inherit;color:inherit;cursor:pointer}
   };
   var state = {screen:'start', mode:store.get('fc-mode','top'), ratio:store.get('fc-ratio','3:4'),
                frame:null, m:null, stream:null, last:null, det:[], boxes:[], mainRef:null, manual:false,
-               comp:store.get('fc-comp','auto')};
+               comp:store.get('fc-comp','auto'), showOv:store.get('fc-ov','1')==='1', planSig:'', Sa:null, thrA:null};
   if(!RATIOS[state.ratio]) state.ratio='3:4';
   if(state.mode!=='top' && state.mode!=='angle') state.mode='top';
   var sm = {beta:null, gamma:null, has:false};
@@ -375,6 +379,39 @@ button{font:inherit;color:inherit;cursor:pointer}
     });
     return out;
   }
+  // 追蹤：同一樣東西沿用同一個框、位置平滑移動；連續出現 3 次才顯示，短暫沒偵測到先保留
+  var tracks=[], trackId=0, TRACK_KEEP=6;
+  function iou(a,b){ var it=inter(a,b); return it/Math.max(1e-6, a.w*a.h+b.w*b.h-it); }
+  function trackBoxes(boxes){
+    var used=[];
+    boxes.forEach(function(b){
+      var bi=-1, bv=.2;
+      tracks.forEach(function(t,i){
+        if(used[i]) return;
+        if(t.src==='ai' && b.src==='ai' && t.label!==b.label) return;
+        var u=iou(t,b); if(u>bv){ bv=u; bi=i; }
+      });
+      if(bi>=0){
+        var t=tracks[bi], a=.35; used[bi]=true;
+        t.x=ema(t.x,b.x,a); t.y=ema(t.y,b.y,a); t.w=ema(t.w,b.w,a); t.h=ema(t.h,b.h,a);
+        t.hits++; t.miss=0;
+        if(b.src==='ai'){ t.src='ai'; t.label=b.label; t.wt=b.wt; t.aiMiss=0; }
+        else if(t.src==='ai' && ++t.aiMiss>12){ t.src='blob'; t.label='物件'; t.wt=1.5; }
+      } else {
+        tracks.push({x:b.x, y:b.y, w:b.w, h:b.h, label:b.label, wt:b.wt, src:b.src, hits:1, miss:0, aiMiss:0, id:++trackId});
+        used[tracks.length-1]=true;
+      }
+    });
+    tracks.forEach(function(t,i){ if(!used[i]) t.miss++; });
+    tracks=tracks.filter(function(t){ return t.miss<=TRACK_KEEP; });
+    var shown=tracks.filter(function(t){ if(t.hits>=3) t.ok=true; return t.ok; });
+    // 被另一個框大半包住的小框 = 同一樣東西的碎片，不顯示
+    return shown.filter(function(t){
+      return !shown.some(function(o){ return o!==t && o.w*o.h>t.w*t.h && inter(o,t)>.6*t.w*t.h; });
+    });
+  }
+  function resetTracks(){ tracks=[]; state.Sa=null; state.thrA=null; state.planSig=''; }
+
   // 選主角：預設挑「大又像食物」的；手動點過就盡量跟住那一個
   function pickMain(boxes){
     boxes.forEach(function(b){ b.main=false; });
@@ -415,18 +452,24 @@ button{font:inherit;color:inherit;cursor:pointer}
     var objs=boxes.slice().sort(function(a,b){ return rank(b)-rank(a); });
     var key=state.comp;
     if(key==='auto') key = objs.length===1 ? (state.mode==='top'?'center':'thirds') : (objs.length===2 ? 'diagonal' : 'triangle');
-    var best=null;
-    COMP[key].sets.forEach(function(slots){
+    var best=null, prev=null;
+    COMP[key].sets.forEach(function(slots, si){
       var k=Math.min(objs.length, slots.length);
       perms(slots.map(function(_,i){return i;})).forEach(function(p){
-        var cost=0, asg=[];
+        var cost=0, asg=[], sig=key+'|'+si;
         for(var i=0;i<k;i++){
           var c=center(objs[i]), t=slots[p[i]], d=Math.hypot(c.x-t[0], c.y-t[1]);
           cost+=d*(objs[i].main?1.5:1); asg.push({box:objs[i], slot:p[i], d:d});
+          sig+='|'+(objs[i].id||i)+':'+p[i];
         }
-        if(!best || cost<best.cost) best={key:key, name:COMP[key].name, slots:slots, asg:asg, cost:cost};
+        var cand={key:key, name:COMP[key].name, slots:slots, asg:asg, cost:cost, sig:sig};
+        if(!best || cost<best.cost) best=cand;
+        if(sig===state.planSig) prev=cand;
       });
     });
+    // 遲滯：之前的安排只要沒有明顯比較差，就沿用，避免點位跳來跳去
+    if(prev && prev.cost <= best.cost*1.25 + .02) best=prev;
+    state.planSig=best.sig;
     return best;
   }
 
@@ -652,25 +695,32 @@ button{font:inherit;color:inherit;cursor:pointer}
   var v=$('#v'), cam=$('#cam'), frameEl=$('#frame'), ov=$('#ov'), st=$('#status');
 
   // 框在畫面上的位置（相機頁座標）
+  // 鏡頭畫面只顯示在框裡，框外全黑：看到的就是拍到的。
+  // 盡量放在上方提示與下方按鈕之間；放不下（例如 9:16）才鋪滿、讓按鈕蓋在畫面上。
+  var TOP_RES=150, BOT_RES=150;
   function layoutFrame(){
     var W=cam.clientWidth, H=cam.clientHeight, r=RATIOS[state.ratio];
-    var fw=W, fh=W/r;
-    if(fh>H){ fh=H; fw=H*r; }
-    state.frame = {x:(W-fw)/2, y:(H-fh)/2, w:fw, h:fh};
-    frameEl.style.left=state.frame.x+'px'; frameEl.style.top=state.frame.y+'px';
-    frameEl.style.width=fw+'px'; frameEl.style.height=fh+'px';
+    var aw=W, ah=H-TOP_RES-BOT_RES, fw=aw, fh=aw/r, top=TOP_RES;
+    if(fh>ah){ fh=ah; fw=ah*r; }
+    if(fw<W*.8){ fw=W; fh=W/r; if(fh>H){ fh=H; fw=H*r; } top=(H-fh)/2; }
+    else top=TOP_RES+(ah-fh)/2;
+    state.frame = {x:(W-fw)/2, y:top, w:fw, h:fh};
+    [frameEl, v].forEach(function(e){
+      e.style.left=state.frame.x+'px'; e.style.top=state.frame.y+'px';
+      e.style.width=fw+'px'; e.style.height=fh+'px';
+    });
     ov.setAttribute('viewBox','0 0 '+W+' '+H);
   }
-  // 框對應到影片原始像素的範圍（影片是 object-fit:cover）
+  // 框裡顯示的是影片置中裁成框比例的部分（object-fit:cover），拍照就裁同一塊
   function cropRect(){
-    var W=cam.clientWidth, H=cam.clientHeight, vw=v.videoWidth, vh=v.videoHeight;
-    var sc=Math.max(W/vw, H/vh), ox=(W-vw*sc)/2, oy=(H-vh*sc)/2, f=state.frame;
-    var x=clamp((f.x-ox)/sc,0,vw), y=clamp((f.y-oy)/sc,0,vh);
-    return {x:x, y:y, w:Math.min(vw-x, f.w/sc), h:Math.min(vh-y, f.h/sc)};
+    var vw=v.videoWidth, vh=v.videoHeight, r=state.frame.w/state.frame.h;
+    var w=vw, h=vw/r;
+    if(h>vh){ h=vh; w=vh*r; }
+    return {x:(vw-w)/2, y:(vh-h)/2, w:w, h:h};
   }
   function setRatio(r){
     state.ratio=r; store.set('fc-ratio', r);
-    state.m=null; state.det=[]; state.mainRef=null; state.manual=false;
+    state.m=null; state.det=[]; state.mainRef=null; state.manual=false; resetTracks();
     document.querySelectorAll('#ratios button').forEach(function(x){ x.setAttribute('aria-pressed', x.dataset.r===r ? 'true':'false'); });
     if(state.screen==='cam') layoutFrame();
   }
@@ -693,6 +743,13 @@ button{font:inherit;color:inherit;cursor:pointer}
   function compLabel(plan){
     return state.comp==='auto' ? '構圖：自動'+(plan?'・'+plan.name:'')+' ▸' : '構圖：'+COMP[state.comp].name+' ▸';
   }
+  function syncOvBtn(){
+    var b=$('#ovBtn'); b.textContent = state.showOv ? '標示：開' : '標示：關'; b.setAttribute('aria-pressed', state.showOv?'true':'false');
+  }
+  syncOvBtn();
+  $('#ovBtn').addEventListener('click', function(){
+    state.showOv=!state.showOv; store.set('fc-ov', state.showOv?'1':'0'); syncOvBtn(); tick();
+  });
   $('#compBtn').addEventListener('click', function(){
     state.comp = COMP_ORDER[(COMP_ORDER.indexOf(state.comp)+1)%COMP_ORDER.length];
     store.set('fc-comp', state.comp);
@@ -701,8 +758,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   function tick(){
     if(state.screen!=='cam' || !v.videoWidth || !state.frame) return;
-    state.m = smoothM(state.m, measure(v, cropRect()));
-    var boxes = mergeBoxes(state.det, blobs(state.m));
+    var raw = measure(v, cropRect());
+    if(!state.Sa || state.Sa.length!==raw.S.length){ state.Sa=new Float32Array(raw.S); state.thrA=raw.thr; }
+    else { for(var i=0;i<raw.S.length;i++) state.Sa[i]+=(raw.S[i]-state.Sa[i])*.35; state.thrA=ema(state.thrA, raw.thr, .2); }
+    state.m = smoothM(state.m, raw);
+    var boxes = trackBoxes(mergeBoxes(state.det, blobs({W:raw.W, H:raw.H, S:state.Sa, thr:state.thrA})));
     pickMain(boxes);
     state.boxes = boxes;
     var ori = sm.has ? {beta:sm.beta, gamma:sm.gamma} : null;
@@ -735,6 +795,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       gauge.hidden = true; gtxt.hidden = true;
     }
     var f=state.frame;
+    ov.style.display = state.showOv ? '' : 'none';
     ov.innerHTML = overlaySVG(boxes, ev.plan, function(x){return f.x+x*f.w;}, function(y){return f.y+y*f.h;}, 1);
   }
 
@@ -828,7 +889,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     var W=src.width, H=src.height, rov=$('#rov');
     rov.setAttribute('viewBox','0 0 '+W+' '+H);
     rov.innerHTML = overlaySVG(boxes, ev.plan, function(x){return x*W;}, function(y){return y*H;}, Math.max(W,H)/400);
-    rov.hidden = !boxes.length;
+    rov.style.display = boxes.length ? '' : 'none';
     $('#togOv').hidden = !boxes.length;
     $('#togOv').textContent = '隱藏構圖標示';
     $('#rscore').textContent = total;
@@ -840,8 +901,9 @@ button{font:inherit;color:inherit;cursor:pointer}
     show('res');
   }
   $('#togOv').addEventListener('click', function(){
-    var rov=$('#rov'); rov.hidden=!rov.hidden;
-    this.textContent = rov.hidden ? '顯示構圖標示' : '隱藏構圖標示';
+    var rov=$('#rov'), off = rov.style.display!=='none';
+    rov.style.display = off ? 'none' : '';
+    this.textContent = off ? '顯示構圖標示' : '隱藏構圖標示';
   });
 
   $('#shot').addEventListener('click', function(){
@@ -873,7 +935,8 @@ button{font:inherit;color:inherit;cursor:pointer}
         detBusy=false;
       }
       var boxes = mergeBoxes(ai, blobs(measure(c, {x:0, y:0, w:c.width, h:c.height})));
-      state.mainRef=null; state.manual=false;
+      state.mainRef=null; state.manual=false; state.planSig='';
+      boxes.forEach(function(b,i){ b.id='a'+i; });
       pickMain(boxes);
       $('#err').textContent='';
       finish(c, URL.createObjectURL(f), {noAngle:true, boxes:boxes, note:'相簿照片沒有角度資料，所以只評光線、構圖和清晰度。長按照片可儲存（儲存的照片不含標示）。'});
