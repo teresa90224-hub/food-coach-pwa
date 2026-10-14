@@ -116,7 +116,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button id="go" class="primary" type="button">開始拍攝</button>
     <label class="ghost">用相簿照片測試<input id="file" type="file" accept="image/*" hidden></label>
     <p id="err" class="err" role="alert"></p>
-    <p class="ver">版本 2026-10-14f</p>
+    <p class="ver">版本 2026-10-14g</p>
   </section>
 
   <section id="cam" class="screen" hidden>
@@ -630,12 +630,13 @@ button{font:inherit;color:inherit;cursor:pointer}
     }
     store.set('fc-det-loading','1');
     detState='loading';
-    detPromise = import(MP_URL+'/vision_bundle.mjs').then(function(mp){
+    var retry=function(fn){ return fn().catch(function(){ return new Promise(function(r){ setTimeout(r,2000); }).then(fn); }); };
+    detPromise = retry(function(){ return import(MP_URL+'/vision_bundle.mjs'); }).then(function(mp){
       return mp.FilesetResolver.forVisionTasks(MP_URL+'/wasm').then(function(fs){
         var mk=function(dl){ return mp.ObjectDetector.createFromOptions(fs, {
           baseOptions:{modelAssetPath:MODEL_URL, delegate:dl}, runningMode:'VIDEO', scoreThreshold:DET_SCORE, maxResults:12}); };
         // GPU 模式在部分裝置會「不報錯但回傳空結果」，固定用 CPU（模型小，夠快）
-        return mk('CPU');
+        return retry(function(){ return mk('CPU'); });
       });
     }).then(function(d){ store.set('fc-det-loading','0'); det=d; detState='ready'; return d; })
       .catch(function(e){ store.set('fc-det-loading','0'); console.warn('detector', e); detErr=String(e && e.message || e); detState='failed'; return null; });
