@@ -388,10 +388,15 @@ button{font:inherit;color:inherit;cursor:pointer}
       });
       if(bi>=0){
         var t=tracks[bi], a=.35; used[bi]=true;
-        t.x=ema(t.x,b.x,a); t.y=ema(t.y,b.y,a); t.w=ema(t.w,b.w,a); t.h=ema(t.h,b.h,a);
         t.hits++; t.miss=0;
+        // AI 認出的框只用 AI 結果更新大小位置：顏色估計的框常把旁邊東西、背景連成一大塊，
+        // 拿來更新會把框撐大（例如杯子框被拉到畫面邊緣，誤判成被切到）
+        if(t.src==='ai' && b.src==='blob'){
+          if(++t.aiMiss>12){ t.src='blob'; t.label='物件'; t.wt=1.5; }
+          else return;
+        }
+        t.x=ema(t.x,b.x,a); t.y=ema(t.y,b.y,a); t.w=ema(t.w,b.w,a); t.h=ema(t.h,b.h,a);
         if(b.src==='ai'){ t.src='ai'; t.label=b.label; t.wt=b.wt; t.aiMiss=0; }
-        else if(t.src==='ai' && ++t.aiMiss>12){ t.src='blob'; t.label='物件'; t.wt=1.5; }
       } else {
         tracks.push({x:b.x, y:b.y, w:b.w, h:b.h, label:b.label, wt:b.wt, src:b.src, hits:1, miss:0, aiMiss:0, id:++trackId});
         used[tracks.length-1]=true;
