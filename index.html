@@ -79,9 +79,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 #ratios{grid-area:ratio;display:flex;gap:6px;justify-content:center}
 #ratios button{flex:1;max-width:60px;min-height:40px;padding:0;font-size:13px;background:rgba(29,24,34,.6);border:1px solid var(--line);border-radius:10px}
 #ratios button[aria-pressed="true"]{background:var(--accent);color:#2b1f05;font-weight:700;border-color:var(--accent)}
-#seg{grid-area:seg;display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;justify-self:start}
-#seg button{background:transparent;border:0;padding:10px 14px;min-height:44px}
-#seg button[aria-pressed="true"]{background:var(--accent);color:#2b1f05;font-weight:700}
+#seg{grid-area:seg;justify-self:start;display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.3;color:var(--ink);text-shadow:0 1px 3px #000}
+#seg b{font-size:15px;color:var(--accent)}
 #shot{grid-area:shot;width:74px;height:74px;border-radius:50%;background:var(--ink);border:5px solid var(--bg);box-shadow:0 0 0 3px var(--ink)}
 #shot:active{transform:scale(.95)}
 #back{grid-area:back;justify-self:end;background:transparent;border:1px solid var(--line);border-radius:12px;min-height:44px;padding:0 14px}
@@ -146,10 +145,7 @@ button{font:inherit;color:inherit;cursor:pointer}
         <button type="button" data-r="4:3">4:3</button>
         <button type="button" data-r="16:9">16:9</button>
       </div>
-      <div id="seg" role="group" aria-label="拍攝角度">
-        <button type="button" data-mode="top" aria-pressed="true">俯拍</button>
-        <button type="button" data-mode="angle" aria-pressed="false">45°</button>
-      </div>
+      <div id="seg" aria-live="polite"><span>建議角度</span><b id="segMode">俯拍</b><span id="segWhy"></span></div>
       <button id="shot" type="button" aria-label="拍照"></button>
       <button id="back" type="button">結束</button>
     </div>
@@ -223,11 +219,10 @@ button{font:inherit;color:inherit;cursor:pointer}
     get:function(k,d){ try{ var v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } },
     set:function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
   };
-  var state = {screen:'start', mode:store.get('fc-mode','top'), ratio:store.get('fc-ratio','3:4'),
+  var state = {screen:'start', mode:'top', modeWhy:'', modeCand:null, modeCnt:0, ratio:store.get('fc-ratio','3:4'),
                frame:null, m:null, stream:null, last:null, det:[], boxes:[], mainRef:null, manual:false,
                comp:store.get('fc-comp','auto'), showOv:store.get('fc-ov','1')==='1', planSig:'', Sa:null, thrA:null};
   if(!RATIOS[state.ratio]) state.ratio='3:4';
-  if(state.mode!=='top' && state.mode!=='angle') state.mode='top';
   var sm = {beta:null, gamma:null, has:false};
 
   window.addEventListener('deviceorientation', function(e){
@@ -492,8 +487,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       pa = Math.min(35, tilt*3.5);
       if(tilt > TOL_DEG){
         if(Math.abs(ep) >= Math.abs(er)){
-          if(state.mode==='top' && ep>=25 && ep<=65) issues.push({pen:pa, msg:'現在是「俯拍」模式（要平放）。想拍 45° 請點下方「45°」'});
-          else if(state.mode==='top') issues.push({pen:pa, msg:'手機再放平一點，鏡頭正對桌面'});
+          if(state.mode==='top') issues.push({pen:pa, msg:'這道建議俯拍：手機再放平一點，鏡頭正對桌面'});
           else issues.push({pen:pa, msg: ep>0 ? '鏡頭再往下壓一點' : '鏡頭再往前抬一點'});
         } else {
           issues.push({pen:pa, msg:'手機有點歪，轉正'});
@@ -731,9 +725,31 @@ button{font:inherit;color:inherit;cursor:pointer}
     document.querySelectorAll('#ratios button').forEach(function(x){ x.setAttribute('aria-pressed', x.dataset.r===r ? 'true':'false'); });
     if(state.screen==='cam') layoutFrame();
   }
-  function setMode(md){
-    state.mode=md; store.set('fc-mode', md);
-    document.querySelectorAll('#seg button').forEach(function(x){ x.setAttribute('aria-pressed', x.dataset.mode===md ? 'true':'false'); });
+  // 系統自動建議角度：有高度的主角（杯子、漢堡、蛋糕…）拍 45°，平的或很多樣一起拍俯拍；
+  // 沒認出食物就看手機現在比較接近哪個角度
+  var TALL = {'杯子':1,'酒杯':1,'瓶子':1,'三明治':1,'熱狗':1,'蛋糕':1,'花瓶':1,'盆栽':1};
+  function suggestMode(boxes, ori){
+    var ai=boxes.filter(function(b){ return b.src==='ai' && b.wt>=1; });
+    if(ai.length>=3) return {mode:'top', why:'多樣一起拍'};
+    var main=boxes.filter(function(b){ return b.main; })[0];
+    if(main && main.src==='ai'){
+      if(TALL[main.label]) return {mode:'angle', why:main.label+'有高度'};
+      if(main.wt>=1) return {mode:'top', why:main.label+'適合從上面拍'};
+    }
+    if(ori) return {mode: ori.beta>=22 ? 'angle' : 'top', why:'依手機目前角度'};
+    return {mode:state.mode, why:state.modeWhy};
+  }
+  function setMode(md, why){
+    state.mode=md; state.modeWhy=why||'';
+    $('#segMode').textContent = md==='top' ? '俯拍' : '45° 斜拍';
+    $('#segWhy').textContent = state.modeWhy;
+  }
+  // 遲滯：新建議要連續出現約 1 秒才換，避免跳來跳去
+  function updateMode(boxes, ori){
+    var s=suggestMode(boxes, ori);
+    if(s.mode===state.mode){ state.modeCnt=0; if(s.why!==state.modeWhy) setMode(s.mode, s.why); return; }
+    if(state.modeCand===s.mode) state.modeCnt++; else { state.modeCand=s.mode; state.modeCnt=1; }
+    if(state.modeCnt>=7){ state.modeCnt=0; setMode(s.mode, s.why); }
   }
 
   // ===== 即時迴圈 =====
@@ -773,6 +789,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     pickMain(boxes);
     state.boxes = boxes;
     var ori = sm.has ? {beta:sm.beta, gamma:sm.gamma} : null;
+    updateMode(boxes, ori);
     var ev = evaluate(state.m, ori, {boxes:boxes});
     state.last = ev;
 
@@ -823,9 +840,6 @@ button{font:inherit;color:inherit;cursor:pointer}
   });
   document.querySelectorAll('#ratios button').forEach(function(b){
     b.addEventListener('click', function(){ setRatio(b.dataset.r); });
-  });
-  document.querySelectorAll('#seg button').forEach(function(b){
-    b.addEventListener('click', function(){ setMode(b.dataset.mode); });
   });
   setRatio(state.ratio); setMode(state.mode);
   setInterval(tick, 150);
@@ -903,7 +917,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     $('#advice').textContent = advice;
     var bars=$('#bars'); bars.textContent='';
     parts.forEach(function(p){ bars.appendChild(barRow(p[0],p[1])); });
-    var modeTxt = ev.parts.angle!=null ? '本次以「'+(state.mode==='top'?'俯拍（手機平放）':'45°')+'」模式評角度，比例 '+state.ratio+'。' : '';
+    var modeTxt = ev.parts.angle!=null ? '系統建議「'+(state.mode==='top'?'俯拍（手機平放）':'45° 斜拍')+'」'+(state.modeWhy?'（'+state.modeWhy+'）':'')+'，依此評角度，比例 '+state.ratio+'。' : '';
     $('#rnote').textContent = opt.note || (modeTxt+'評分只看技術面（角度、光線、構圖、清晰度），不評好不好看。長按照片可儲存（儲存的照片不含標示）。');
     show('res');
   }
@@ -945,6 +959,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       state.mainRef=null; state.manual=false; state.planSig='';
       boxes.forEach(function(b,i){ b.id='a'+i; });
       pickMain(boxes);
+      setMode(suggestMode(boxes, null).mode, '');
       $('#err').textContent='';
       finish(c, URL.createObjectURL(f), {noAngle:true, boxes:boxes, note:'相簿照片沒有角度資料，所以只評光線、構圖和清晰度。長按照片可儲存（儲存的照片不含標示）。'});
     }catch(err){
