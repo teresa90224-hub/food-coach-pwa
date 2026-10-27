@@ -235,7 +235,7 @@ button{font:inherit;color:inherit;cursor:pointer}
   function show(name){
     state.screen = name;
     ['start','cam','res'].forEach(function(n){ $('#'+n).hidden = (n!==name); });
-    if(name==='cam') layoutFrame();
+    if(name==='cam'){ layoutFrame(); hintState.msg=null; }
   }
 
   // ===== 影像量測 =====
@@ -480,6 +480,19 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   // ===== 評估 =====
   // 回傳 {score, parts:{angle,light,comp}, issues:[{pen,msg}], tilt, plan}
+  // 框沿著某一邊的那段畫面邊緣（最外 2 格），有多少比例是「物件」像素
+  var CUT_FILL = 0.45;
+  function edgeFill(sal, b, side){
+    var W=sal.W, H=sal.H, c=clipBox(b), hit=0, n=0, i, j;
+    if(side==='左' || side==='右'){
+      var y0=Math.floor(c.y*H), y1=Math.min(H, Math.ceil((c.y+c.h)*H)), xs = side==='左' ? [0,1] : [W-2,W-1];
+      for(j=y0;j<y1;j++) for(i=0;i<2;i++){ n++; if(sal.S[j*W+xs[i]]>sal.thr) hit++; }
+    } else {
+      var x0=Math.floor(c.x*W), x1=Math.min(W, Math.ceil((c.x+c.w)*W)), ys = side==='上' ? [0,1] : [H-2,H-1];
+      for(j=x0;j<x1;j++) for(i=0;i<2;i++){ n++; if(sal.S[ys[i]*W+j]>sal.thr) hit++; }
+    }
+    return n ? hit/n : 0;
+  }
   function evaluate(m, ori, opt){
     opt = opt||{};
     var issues=[], pa=0, pl=0, pc=0, tilt=null, plan=null;
@@ -524,8 +537,14 @@ button{font:inherit;color:inherit;cursor:pointer}
       if(area<BOX_MIN){ pf=Math.min(7,(BOX_MIN-area)*50); issues.push({pen:pf+1, msg:'畫面太空：靠近一點，或多擺幾樣'}); }
       else if(area>BOX_MAX){ pf=Math.min(7,(area-BOX_MAX)*25); issues.push({pen:pf+1, msg:'太擠了：退後一點，或拿掉一兩樣'}); }
       // 切邊（主角被切比配角嚴重）
+      var sal = opt.sal || m;
       boxes.forEach(function(b){
-        var side = b.x<.01 ? ['左','右'] : b.x+b.w>.99 ? ['右','左'] : b.y<.01 ? ['上','下'] : b.y+b.h>.99 ? ['下','上'] : null;
+        var cand = [];
+        if(b.x<.01) cand.push(['左','右']); if(b.x+b.w>.99) cand.push(['右','左']);
+        if(b.y<.01) cand.push(['上','下']); if(b.y+b.h>.99) cand.push(['下','上']);
+        // 框貼邊還不夠：那一段畫面邊緣真的有東西（不是桌面）才算被切到。
+        // AI 框常常比實物大一圈，光看框會一直誤報。
+        var side = cand.filter(function(sd){ return !sal || !sal.S || edgeFill(sal, b, sd[0])>=CUT_FILL; })[0];
         if(!side) return;
         var p = b.main ? 10 : 4;
         pe = Math.max(pe, p);
@@ -784,6 +803,20 @@ button{font:inherit;color:inherit;cursor:pointer}
     tick();
   });
 
+  // 提示不要一直跳：目前這條還成立、且新的沒有明顯更嚴重，就繼續顯示；
+  // 要換成別條，新的那條得連續當第一名約 0.9 秒
+  var hintState = {msg:null, cand:null, cnt:0};
+  function stableHint(issues){
+    var top = issues[0], want = top ? top.msg : '';
+    if(hintState.msg===null){ hintState.msg = want; return want; }
+    if(want===hintState.msg){ hintState.cnt=0; return want; }
+    var cur = issues.filter(function(x){ return x.msg===hintState.msg; })[0];
+    if(cur && top.pen < cur.pen+3){ hintState.cnt=0; return hintState.msg; }
+    if(hintState.cand===want) hintState.cnt++; else { hintState.cand=want; hintState.cnt=1; }
+    if(hintState.cnt>=6){ hintState.msg=want; hintState.cnt=0; }
+    return hintState.msg;
+  }
+
   function tick(){
     if(state.screen!=='cam' || !v.videoWidth || !state.frame) return;
     var raw = measure(v, cropRect());
@@ -795,17 +828,12 @@ button{font:inherit;color:inherit;cursor:pointer}
     state.boxes = boxes;
     var ori = sm.has ? {beta:sm.beta, gamma:sm.gamma} : null;
     updateMode(boxes, ori);
-    var ev = evaluate(state.m, ori, {boxes:boxes});
+    var ev = evaluate(state.m, ori, {boxes:boxes, sal:{S:state.Sa, thr:state.thrA, W:raw.W, H:raw.H}});
     state.last = ev;
 
-    var top = ev.issues[0];
-    if(top){
-      hint.textContent = top.msg;
-      hint.className = '';
-    } else {
-      hint.textContent = '很好，現在拍';
-      hint.className = 'ok';
-    }
+    var msg = stableHint(ev.issues);
+    hint.textContent = msg || '很好，現在拍';
+    hint.className = msg ? '' : 'ok';
     scoreEl.textContent = ev.score;
     scoreEl.className = ev.score>=80 ? 'ok' : (ev.score>=60 ? 'mid' : '');
     st.textContent = statusText(boxes);
